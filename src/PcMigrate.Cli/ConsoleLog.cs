@@ -10,7 +10,7 @@ internal sealed class ConsoleLog(string? logFile) : IMigrationLog, IDisposable
     private readonly object _lock = new();
     private readonly Stopwatch _sinceRedraw = Stopwatch.StartNew();
     private readonly Stopwatch _total = Stopwatch.StartNew();
-    private readonly StreamWriter? _file = logFile is null ? null : new StreamWriter(logFile, append: true) { AutoFlush = true };
+    private readonly StreamWriter? _file = OpenLogFile(logFile);
     private bool _statusShown;
     public int WarningCount { get; private set; }
 
@@ -51,6 +51,13 @@ internal sealed class ConsoleLog(string? logFile) : IMigrationLog, IDisposable
             Console.ForegroundColor = old;
             _file?.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {level} {message}");
         }
+    }
+
+    private static StreamWriter? OpenLogFile(string? path)
+    {
+        if (path is null) return null;
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        return new StreamWriter(path, append: true) { AutoFlush = true };
     }
 
     private static int SafeWidth()
