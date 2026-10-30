@@ -1,7 +1,26 @@
-# pc-migrate
+<h1 align="center">pc-migrate</h1>
+<p align="center">Move files and settings from an old Windows PC to a new one, over the network or with an external drive.</p>
 
-Moves a person's files and settings from an old Windows PC to a new one, either over the
-network or through an external drive. A single `pcmigrate.exe`, nothing to install.
+<h2 align="center">Download</h2>
+
+<table align="center">
+  <tr>
+    <td align="center" width="280">
+      <a href="https://github.com/tylorfaber-arch/pc-migrate/releases/latest/download/pcmigrate.exe"><b>⬇&nbsp; pcmigrate.exe</b></a><br>
+      <sub>Single file &middot; no install &middot; USB-friendly</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub><b>Requirements:</b> Windows 10 or 11, 64-bit &nbsp;&middot;&nbsp; Run as administrator &nbsp;&middot;&nbsp; Nothing else to install</sub><br>
+  <sub>Windows may show a SmartScreen warning because the app isn't code-signed yet &mdash; click <b>More info &rarr; Run anyway</b>.</sub><br>
+  <sub><a href="https://github.com/tylorfaber-arch/pc-migrate/releases">All releases</a></sub>
+</p>
+
+<br>
+
+---
 
 > Status: step 1 of the roadmap (files and settings). Moving installed programs is next.
 
@@ -85,8 +104,9 @@ dotnet test
 dotnet publish src/PcMigrate.Cli -c Release -o artifacts   # -> artifacts/pcmigrate.exe
 ```
 
-GitHub Actions builds `pcmigrate.exe` on every push, under the run's **Artifacts**. Pushing a tag
-such as `v0.1.0` attaches it to a GitHub release.
+GitHub Actions tests and builds `pcmigrate.exe` on every pull request (under the run's
+**Artifacts**). Every push to `main` also publishes a GitHub release with the exe, which is what the
+Download link at the top serves.
 
 ## Layout
 
