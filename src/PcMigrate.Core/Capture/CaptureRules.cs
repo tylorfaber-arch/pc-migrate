@@ -44,6 +44,8 @@ public sealed class CaptureRules
     [
         "*.tmp", "~$*", "Thumbs.db", "*.partial", "parent.lock", "lockfile", "LOCK", "SingletonLock",
         "SingletonCookie", "SingletonSocket", "*.crdownload", "*.part",
+        // Folder display settings. The new PC has its own, and Google Drive refuses to store them.
+        "desktop.ini",
     ];
 
     public bool IsFolderExcluded(string folderName) =>

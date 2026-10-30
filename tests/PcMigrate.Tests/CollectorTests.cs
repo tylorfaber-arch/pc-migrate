@@ -8,6 +8,7 @@ public class CollectorTests
     [InlineData("report.tmp", true)]
     [InlineData("~$Budget.xlsx", true)]
     [InlineData("THUMBS.DB", true)]
+    [InlineData("Desktop.ini", true)]
     [InlineData("Budget.xlsx", false)]
     public void FilePatterns(string name, bool excluded) => Assert.Equal(excluded, new CaptureRules().IsFileExcluded(name));
 
