@@ -51,6 +51,7 @@ public static class Discovery
             if (request.Buffer.AsSpan().SequenceEqual(Question))
             {
                 try { await udp.SendAsync(answer, request.RemoteEndPoint, ct); }
+                catch (OperationCanceledException) { return; }
                 catch (SocketException) { }
             }
         }
