@@ -19,6 +19,8 @@ public sealed class ApplyOptions
 {
     /// <summary>Old user name to new user name, for when the accounts are named differently.</summary>
     public IReadOnlyDictionary<string, string> UserMap { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Old users whose files should not be copied at all.</summary>
+    public IReadOnlySet<string> SkipUsers { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     public ConflictMode Conflicts { get; init; } = ConflictMode.NewerWins;
     public bool IncludeWifi { get; init; } = true;
     public bool IncludeUserSettings { get; init; } = true;
@@ -56,13 +58,14 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log)
 
         UserProfileInfo? FindTarget(string sourceUser)
         {
+            if (options.SkipUsers.Contains(sourceUser)) return null;
             var name = options.UserMap.TryGetValue(sourceUser, out var mapped) ? mapped : sourceUser;
             return target.Users.FirstOrDefault(u => string.Equals(u.UserName, name, StringComparison.OrdinalIgnoreCase));
         }
 
         foreach (var user in source.Users.Where(u => manifest.Files.Any(f => StorePath.TryParseUserFile(f.StorePath, out var n, out _) && n == u.UserName)))
         {
-            if (FindTarget(user.UserName) is null)
+            if (FindTarget(user.UserName) is null && !options.SkipUsers.Contains(user.UserName))
             {
                 result.MissingUsers.Add(user.UserName);
                 var name = options.UserMap.TryGetValue(user.UserName, out var mapped) ? mapped : user.UserName;

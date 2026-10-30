@@ -118,6 +118,39 @@ public class CaptureApplyTests
     }
 
     [Fact]
+    public async Task SkippedUser_IsNotCopiedOrReportedMissing()
+    {
+        using var oldPc = new FakePc("old", "a", "b");
+        using var newPc = new FakePc("new", "a", "b");
+        using var store = new TempDir();
+        oldPc.WriteFile("a", "Documents/a.txt", "a");
+        oldPc.WriteFile("b", "Documents/b.txt", "b");
+        await using (var sink = new FolderSink(store.Path))
+            await new CaptureEngine(oldPc, new ListLog()).RunAsync(sink, Options.Capture());
+
+        var result = await new ApplyEngine(newPc, new ListLog()).RunAsync(store.Path, new ApplyOptions
+        {
+            SkipUsers = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "B" },
+        });
+
+        Assert.Equal(1, result.FilesCopied);
+        Assert.Empty(result.MissingUsers);
+        Assert.False(File.Exists(Path.Combine(newPc.Profile("b"), "Documents", "b.txt")));
+    }
+
+    [Fact]
+    public void Estimate_MatchesWhatCaptureCopies()
+    {
+        using var pc = new FakePc("old", "a");
+        pc.WriteFile("a", "Documents/x.txt", "12345");
+        pc.WriteFile("a", "Desktop/y.txt", "123");
+        pc.WriteFile("a", "Documents/skip.tmp", "123456789");
+        var (files, bytes) = CaptureEngine.Estimate(pc.Inventory.Users[0], new CaptureRules());
+        Assert.Equal(2, files);
+        Assert.Equal(8, bytes);
+    }
+
+    [Fact]
     public async Task UnknownUserInCapture_Throws()
     {
         using var oldPc = new FakePc("old", "a");

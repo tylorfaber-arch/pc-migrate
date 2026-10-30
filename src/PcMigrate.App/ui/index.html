@@ -1,0 +1,830 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pc-migrate</title>
+<style>
+:root {
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-2: #f8f9fc;
+  --border: #e3e7ef;
+  --text: #121826;
+  --muted: #5d6679;
+  --faint: #8a93a6;
+  --accent: #3157d5;
+  --accent-2: #5b7cf0;
+  --accent-soft: #e8eeff;
+  --ok: #1f9d55;
+  --ok-soft: #e3f5ea;
+  --warn: #b7791f;
+  --warn-soft: #fdf3dc;
+  --bad: #d64545;
+  --shadow: 0 1px 2px rgba(16,24,40,.04), 0 4px 16px rgba(16,24,40,.06);
+  --shadow-hover: 0 2px 4px rgba(16,24,40,.06), 0 12px 32px rgba(49,87,213,.14);
+  --radius: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1218;
+    --surface: #171b24;
+    --surface-2: #1c212c;
+    --border: #2a3140;
+    --text: #e8ebf2;
+    --muted: #a0a8b8;
+    --faint: #6f7889;
+    --accent: #6d8cff;
+    --accent-2: #8aa3ff;
+    --accent-soft: #1f2840;
+    --ok: #3ccf7e;
+    --ok-soft: #15291f;
+    --warn: #e2a93b;
+    --warn-soft: #2d2414;
+    --bad: #ff6b6b;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 16px rgba(0,0,0,.25);
+    --shadow-hover: 0 2px 4px rgba(0,0,0,.3), 0 12px 32px rgba(109,140,255,.18);
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+h1, h2, h3 { font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: 28px; font-weight: 650; }
+h2 { font-size: 15px; font-weight: 600; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.mono { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; }
+
+/* ---------- header ---------- */
+header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; }
+.brand svg { width: 28px; height: 28px; }
+.brand .ver { font-weight: 400; color: var(--faint); font-size: 12px; margin-left: 2px; }
+.steps { display: flex; gap: 6px; margin-left: auto; align-items: center; }
+.steps span { width: 28px; height: 4px; border-radius: 2px; background: var(--border); transition: background .3s; }
+.steps span.on { background: var(--accent); }
+.pc-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--muted); font-size: 12px;
+}
+.pc-chip b { color: var(--text); font-weight: 600; }
+
+/* ---------- layout ---------- */
+main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
+.screen { display: none; width: 100%; max-width: 820px; padding: 40px 32px 32px; flex-direction: column; animation: in .28s ease; }
+.screen.active { display: flex; }
+@keyframes in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.title { margin-bottom: 28px; }
+.title p { margin-top: 6px; color: var(--muted); font-size: 15px; }
+.back {
+  align-self: flex-start; margin: -16px 0 18px -8px; padding: 4px 8px; border-radius: 8px;
+  color: var(--muted); background: none; border: 0; font: inherit; cursor: pointer; display: flex; align-items: center; gap: 4px;
+}
+.back:hover { color: var(--text); background: var(--surface-2); }
+
+/* ---------- cards ---------- */
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.choice {
+  position: relative; text-align: left; font: inherit; color: inherit; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 26px 24px 24px; box-shadow: var(--shadow);
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.choice:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); border-color: var(--accent-2); }
+.choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.choice .icon {
+  width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); margin-bottom: 6px;
+}
+.choice .icon svg { width: 28px; height: 28px; }
+.choice h2 { font-size: 18px; }
+.choice p { color: var(--muted); }
+.choice .tag {
+  position: absolute; top: 18px; right: 18px; font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  padding: 3px 9px; border-radius: 999px; background: var(--ok-soft); color: var(--ok);
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 20px 22px;
+}
+.card + .card { margin-top: 14px; }
+.card h2 { margin-bottom: 12px; }
+
+/* ---------- lists ---------- */
+.rows { display: flex; flex-direction: column; }
+.row {
+  display: flex; align-items: center; gap: 14px; padding: 12px 4px;
+  border-top: 1px solid var(--border);
+}
+.row:first-child { border-top: 0; }
+.row .grow { flex: 1; min-width: 0; }
+.row .name { font-weight: 600; }
+.row .sub { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .size { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; min-width: 120px; }
+.avatar {
+  width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #fff; font-weight: 650;
+}
+.pc-row { cursor: pointer; border-radius: 10px; padding: 12px; border: 1px solid transparent; }
+.pc-row + .pc-row { margin-top: 6px; }
+.pc-row:hover { background: var(--surface-2); border-color: var(--border); }
+.pc-row.sel { background: var(--accent-soft); border-color: var(--accent); }
+
+/* ---------- controls ---------- */
+.check { appearance: none; width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--faint); margin: 0; cursor: pointer; flex: none; display: grid; place-items: center; transition: all .12s; }
+.check:checked { background: var(--accent); border-color: var(--accent); }
+.check:checked::after { content: ""; width: 10px; height: 6px; border: 2px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px,-1px); }
+.toggle-row { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-top: 1px solid var(--border); cursor: pointer; }
+.toggle-row:first-of-type { border-top: 0; }
+.toggle-row .grow { flex: 1; }
+.toggle-row .sub { color: var(--faint); font-size: 12px; }
+.switch { appearance: none; width: 40px; height: 22px; border-radius: 999px; background: var(--border); position: relative; cursor: pointer; transition: background .15s; flex: none; margin: 0; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: left .15s; }
+.switch:checked { background: var(--accent); }
+.switch:checked::after { left: 21px; }
+select, input[type=text] {
+  font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 9px; padding: 8px 12px; outline: none; user-select: text;
+}
+select:focus, input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.btn {
+  font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 11px 22px; cursor: pointer;
+  background: var(--accent); color: #fff; transition: filter .12s, transform .05s;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn.ghost { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn.ghost:hover { background: var(--surface-2); }
+.btn.danger { background: transparent; color: var(--bad); border: 1px solid var(--border); }
+.actions { display: flex; align-items: center; gap: 12px; margin-top: 24px; }
+.actions .spacer { flex: 1; }
+.folder-pick { display: flex; gap: 10px; align-items: center; }
+.folder-pick .path {
+  flex: 1; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); border: 1px dashed var(--border);
+  color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.folder-pick .path.set { color: var(--text); border-style: solid; }
+.hint { margin-top: 10px; font-size: 12px; color: var(--faint); }
+.hint.warn { color: var(--warn); }
+
+/* ---------- code ---------- */
+.code-boxes { display: flex; gap: 10px; justify-content: center; margin: 8px 0 4px; }
+.code-boxes input {
+  width: 52px; height: 64px; text-align: center; font-size: 28px; font-weight: 650; padding: 0;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+}
+.code-boxes .gap { width: 8px; }
+.big-code {
+  display: flex; gap: 10px; justify-content: center; margin: 6px 0 4px;
+}
+.big-code span {
+  width: 64px; height: 80px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--surface-2); border: 1px solid var(--border);
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; font-size: 40px; font-weight: 650;
+  color: var(--accent);
+}
+.big-code .gap { width: 10px; background: none; border: 0; }
+.waiting { display: flex; align-items: center; gap: 12px; justify-content: center; color: var(--muted); margin-top: 22px; }
+.pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(49,87,213,.45); } 50% { box-shadow: 0 0 0 9px rgba(49,87,213,0); } }
+.radar { width: 84px; height: 84px; margin: 4px auto 16px; position: relative; }
+.radar i { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; animation: radar 2.4s ease-out infinite; }
+.radar i:nth-child(2) { animation-delay: .8s; } .radar i:nth-child(3) { animation-delay: 1.6s; }
+.radar b { position: absolute; inset: 30px; border-radius: 50%; background: var(--accent); }
+@keyframes radar { from { transform: scale(.35); opacity: .9; } to { transform: scale(1); opacity: 0; } }
+
+/* ---------- progress ---------- */
+.progress-hero { display: flex; align-items: center; gap: 28px; }
+.ring { width: 150px; height: 150px; flex: none; position: relative; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 10; }
+.ring .track { stroke: var(--border); }
+.ring .bar { stroke: url(#grad); stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
+.ring .pct { position: absolute; inset: 0; display: grid; place-items: center; font-size: 30px; font-weight: 650; font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; }
+.ring.indeterminate svg { animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(270deg); } }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px 28px; flex: 1; }
+.stat .k { font-size: 12px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.stat .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.current { margin-top: 22px; padding: 10px 14px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phase { margin-top: 14px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+
+/* ---------- done ---------- */
+.done-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; margin: 8px 0 26px; }
+.done-hero .badge { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; background: var(--ok-soft); color: var(--ok); animation: pop .4s cubic-bezier(.2,1.4,.4,1); }
+.done-hero .badge.bad { background: #fde8e8; color: var(--bad); }
+.done-hero .badge svg { width: 36px; height: 36px; }
+@keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: none; opacity: 1; } }
+.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.summary .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+details { margin-top: 14px; }
+summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+.warn-list { max-height: 180px; overflow: auto; font-size: 12px; color: var(--muted); padding: 8px 12px; background: var(--surface-2); border-radius: 10px; user-select: text; }
+.warn-list div { padding: 3px 0; border-top: 1px solid var(--border); }
+.warn-list div:first-child { border-top: 0; }
+.apps { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; max-height: 260px; overflow: auto; }
+.app { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.app .dot { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; flex: none; }
+.app .t { min-width: 0; }
+.app .t div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app .t .p { font-size: 11px; color: var(--faint); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0;
+  background: var(--text); color: var(--bg); padding: 10px 18px; border-radius: 10px; font-weight: 500;
+  transition: all .25s; pointer-events: none; max-width: 80%;
+}
+.toast.show { opacity: 1; transform: translateX(-50%); }
+.shimmer { display: inline-block; width: 80px; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--border), var(--surface-2), var(--border)); background-size: 200% 100%; animation: sh 1.2s linear infinite; vertical-align: middle; }
+@keyframes sh { to { background-position: -200% 0; } }
+footer { padding: 10px 28px; color: var(--faint); font-size: 12px; display: flex; gap: 16px; border-top: 1px solid var(--border); background: var(--surface); }
+footer .grow { flex: 1; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5b7cf0"/><stop offset="1" stop-color="#2fb5a6"/></linearGradient>
+    <symbol id="i-old" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="13" height="10" rx="1.5"/><path d="M7 18h5M9.5 14v4"/><path d="M17 9h4m0 0-2-2m2 2-2 2"/></symbol>
+    <symbol id="i-new" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="13" height="10" rx="1.5"/><path d="M12 18h5M14.5 14v4"/><path d="M7 9H3m0 0 2-2M3 9l2 2"/></symbol>
+    <symbol id="i-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M2 9.5a14 14 0 0 1 20 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5 13 7.5 5h9L19 13"/><circle cx="17" cy="16.5" r=".9" fill="currentColor"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="url(#grad)"/><path d="M9 13h12m0 0-3.5-3.5M21 13l-3.5 3.5M23 19H11m0 0 3.5-3.5M11 19l3.5 3.5" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  </defs>
+</svg>
+
+<header>
+  <div class="brand"><svg><use href="#logo"/></svg>pc-migrate <span class="ver" id="ver"></span></div>
+  <div class="steps" id="steps"></div>
+  <div class="pc-chip"><svg width="14" height="14"><use href="#i-pc"/></svg><span>This PC</span><b id="pcName">…</b></div>
+</header>
+
+<main>
+  <!-- HOME -->
+  <section class="screen" id="s-home">
+    <div class="title">
+      <h1>Let's move your stuff.</h1>
+      <p>Files, browser bookmarks, Wi-Fi networks and settings, from your old PC to your new one. Run pc-migrate on both PCs.</p>
+    </div>
+    <div class="choices">
+      <button class="choice" data-go="old-method">
+        <div class="icon"><svg><use href="#i-old"/></svg></div>
+        <h2>This is my old PC</h2>
+        <p>Copy everything from this PC so it can go to the new one.</p>
+      </button>
+      <button class="choice" data-go="new-method">
+        <div class="icon"><svg><use href="#i-new"/></svg></div>
+        <h2>This is my new PC</h2>
+        <p>Bring everything over from the old PC onto this one.</p>
+      </button>
+    </div>
+  </section>
+
+  <!-- OLD: METHOD -->
+  <section class="screen" id="s-old-method">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>How do you want to move it?</h1><p>Either way, nothing on this PC is changed or deleted.</p></div>
+    <div class="choices">
+      <button class="choice" data-go="old-find">
+        <span class="tag">Easiest</span>
+        <div class="icon"><svg><use href="#i-net"/></svg></div>
+        <h2>Over the network</h2>
+        <p>Both PCs on the same Wi-Fi or network. Start pc-migrate on the new PC first.</p>
+      </button>
+      <button class="choice" data-go="old-drive">
+        <div class="icon"><svg><use href="#i-drive"/></svg></div>
+        <h2>With an external drive</h2>
+        <p>Save to a USB drive, then plug it into the new PC.</p>
+      </button>
+    </div>
+  </section>
+
+  <!-- OLD: FIND NEW PC -->
+  <section class="screen" id="s-old-find">
+    <button class="back" data-go="old-method"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Connect to your new PC</h1><p>On the new PC, choose <b>This is my new PC</b> → <b>Over the network</b>. It will show up here.</p></div>
+    <div class="card">
+      <h2>New PCs on this network</h2>
+      <div id="found"></div>
+      <div id="searching" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking…</div>
+      <details style="margin-top:6px"><summary>Not showing up? Type its IP address</summary>
+        <div style="display:flex;gap:10px;margin-top:8px"><input type="text" id="manualIp" placeholder="192.168.1.50" style="width:220px"><button class="btn ghost" id="useIp">Use this address</button></div>
+      </details>
+    </div>
+    <div class="card">
+      <h2>Pairing code</h2>
+      <p class="muted" style="margin-bottom:12px">Type the 6-digit code shown on the new PC.</p>
+      <div class="code-boxes" id="codeBoxes"></div>
+    </div>
+    <div class="actions"><span class="spacer"></span><button class="btn" id="findNext" disabled>Next</button></div>
+  </section>
+
+  <!-- OLD: DRIVE -->
+  <section class="screen" id="s-old-drive">
+    <button class="back" data-go="old-method"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Where should we save it?</h1><p>Pick a folder on your external drive. An empty folder is best.</p></div>
+    <div class="card">
+      <div class="folder-pick"><div class="path" id="savePath">No folder chosen</div><button class="btn ghost" id="pickSave">Browse…</button></div>
+      <div class="hint" id="saveHint"></div>
+    </div>
+    <div class="actions"><span class="spacer"></span><button class="btn" id="driveNext" disabled>Next</button></div>
+  </section>
+
+  <!-- OLD: WHAT -->
+  <section class="screen" id="s-old-what">
+    <button class="back" id="whatBack"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>What should we move?</h1><p id="whatSub">Everyone's files are selected. Untick anyone you want to leave behind.</p></div>
+    <div class="card"><h2>People</h2><div class="rows" id="userRows"></div></div>
+    <div class="card">
+      <h2>Settings</h2>
+      <label class="toggle-row"><div class="grow"><div>Wi-Fi networks and passwords</div><div class="sub">So the new PC connects on its own</div></div><input type="checkbox" class="switch" id="optWifi" checked></label>
+      <label class="toggle-row"><div class="grow"><div>Wallpaper and mapped network drives</div><div class="sub">Per person</div></div><input type="checkbox" class="switch" id="optSettings" checked></label>
+      <label class="toggle-row"><div class="grow"><div>Copy files that are open</div><div class="sub">Takes a snapshot first, so Outlook and browsers don't need closing</div></div><input type="checkbox" class="switch" id="optShadow" checked></label>
+    </div>
+    <div class="actions"><span class="muted" id="totalSize"></span><span class="spacer"></span><button class="btn" id="startCapture">Start moving</button></div>
+  </section>
+
+  <!-- NEW: METHOD -->
+  <section class="screen" id="s-new-method">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>How is it coming over?</h1><p>Files already on this PC are kept. If the same file is on both, the newer one wins.</p></div>
+    <div class="choices">
+      <button class="choice" id="goReceive">
+        <span class="tag">Easiest</span>
+        <div class="icon"><svg><use href="#i-net"/></svg></div>
+        <h2>Over the network</h2>
+        <p>We'll show a code to type on the old PC.</p>
+      </button>
+      <button class="choice" data-go="new-drive">
+        <div class="icon"><svg><use href="#i-drive"/></svg></div>
+        <h2>From an external drive</h2>
+        <p>The drive the old PC saved to.</p>
+      </button>
+    </div>
+  </section>
+
+  <!-- NEW: RECEIVE -->
+  <section class="screen" id="s-new-receive">
+    <button class="back" id="receiveBack"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title" style="text-align:center"><h1>Ready for your old PC</h1><p>On the old PC, choose <b>This is my old PC</b> → <b>Over the network</b>, pick <b id="rxName"></b>, and type this code:</p></div>
+    <div class="card" style="padding:30px 22px">
+      <div class="big-code" id="bigCode"></div>
+      <div class="waiting"><span class="pulse"></span>Waiting for the old PC to connect…</div>
+      <div class="hint" style="text-align:center" id="rxIps"></div>
+    </div>
+  </section>
+
+  <!-- NEW: DRIVE -->
+  <section class="screen" id="s-new-drive">
+    <button class="back" data-go="new-method"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Where did the old PC save it?</h1><p>Plug in the drive and pick the folder you saved to.</p></div>
+    <div class="card">
+      <div class="folder-pick"><div class="path" id="loadPath">No folder chosen</div><button class="btn ghost" id="pickLoad">Browse…</button></div>
+      <div class="hint" id="loadHint"></div>
+    </div>
+    <div class="actions"><span class="spacer"></span><button class="btn" id="loadNext" disabled>Next</button></div>
+  </section>
+
+  <!-- NEW: REVIEW -->
+  <section class="screen" id="s-new-review">
+    <div class="title"><h1>Almost there</h1><p id="reviewSub"></p></div>
+    <div class="card">
+      <h2>Whose files go where</h2>
+      <p class="muted" style="margin:-4px 0 6px">Each person from the old PC goes into an account on this PC.</p>
+      <div class="rows" id="mapRows"></div>
+    </div>
+    <div class="card">
+      <h2>If a file is already on this PC</h2>
+      <select id="conflicts" style="width:100%">
+        <option value="newer">Keep whichever is newer (recommended)</option>
+        <option value="overwrite">Always use the old PC's copy</option>
+        <option value="skip">Always keep this PC's copy</option>
+      </select>
+    </div>
+    <div class="actions"><span class="hint warn" style="margin:0" id="closeApps">Close web browsers and Outlook before you start.</span><span class="spacer"></span><button class="btn" id="startApply">Move it onto this PC</button></div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section class="screen" id="s-progress">
+    <div class="title"><h1 id="progTitle">Moving your stuff</h1><p id="progSub">You can keep using the PC while this runs.</p></div>
+    <div class="card" style="padding:28px">
+      <div class="progress-hero">
+        <div class="ring" id="ring">
+          <svg viewBox="0 0 120 120"><circle class="track" cx="60" cy="60" r="52"/><circle class="bar" id="ringBar" cx="60" cy="60" r="52" stroke-dasharray="326.7" stroke-dashoffset="326.7"/></svg>
+          <div class="pct" id="pct">0%</div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="k">Files</div><div class="v" id="stFiles">0</div></div>
+          <div class="stat"><div class="k">Copied</div><div class="v" id="stBytes">0 B</div></div>
+          <div class="stat"><div class="k">Speed</div><div class="v" id="stSpeed">–</div></div>
+          <div class="stat"><div class="k">Time left</div><div class="v" id="stEta">–</div></div>
+        </div>
+      </div>
+      <div class="phase" id="phase"><span class="pulse"></span><span id="phaseText">Getting ready…</span></div>
+      <div class="current mono" id="current">&nbsp;</div>
+    </div>
+    <div class="actions"><span id="warnPill"></span><span class="spacer"></span><button class="btn danger" id="cancel">Stop</button></div>
+  </section>
+
+  <!-- DONE -->
+  <section class="screen" id="s-done">
+    <div class="done-hero">
+      <div class="badge" id="doneBadge"><svg><use href="#i-check"/></svg></div>
+      <h1 id="doneTitle">All done</h1>
+      <p class="muted" id="doneSub"></p>
+    </div>
+    <div class="summary" id="doneStats"></div>
+    <div class="card" id="appsCard" style="margin-top:18px;display:none">
+      <h2 id="appsTitle">Programs to install on this PC</h2>
+      <p class="muted" style="margin:-4px 0 12px">These were on the old PC. Programs aren't moved yet, so install the ones you still need.</p>
+      <div class="apps" id="apps"></div>
+    </div>
+    <details id="warnBox" style="display:none"><summary id="warnSummary"></summary><div class="warn-list" id="warnList"></div></details>
+    <div class="actions"><button class="btn ghost" id="openReport" style="display:none">Open full report</button><span class="spacer"></span><button class="btn" id="finish">Close</button></div>
+  </section>
+</main>
+
+<footer><span id="footLeft"></span><span class="grow"></span><span>Nothing leaves your network. No account needed.</span></footer>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------------------
+// Bridge to the C# host (WebView2). In a normal browser a mock host is used so
+// the screens can be previewed and designed without Windows.
+// ---------------------------------------------------------------------------
+const webview = window.chrome && window.chrome.webview;
+let nextId = 1;
+const pending = new Map();
+const listeners = {};
+function call(cmd, args) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    if (webview) webview.postMessage({ id, cmd, args: args || {} });
+    else Mock.handle({ id, cmd, args: args || {} });
+  });
+}
+function on(event, fn) { (listeners[event] = listeners[event] || []).push(fn); }
+function receive(msg) {
+  if (msg.id && pending.has(msg.id)) {
+    const p = pending.get(msg.id); pending.delete(msg.id);
+    msg.error ? p.reject(new Error(msg.error)) : p.resolve(msg.result);
+  } else if (msg.event) {
+    (listeners[msg.event] || []).forEach(fn => fn(msg));
+  }
+}
+if (webview) webview.addEventListener("message", e => receive(e.data));
+
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function fmtBytes(b) {
+  if (b == null) return "–";
+  const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return (i === 0 ? b : b.toFixed(b < 10 ? 1 : 0)) + " " + u[i];
+}
+const fmtNum = n => Number(n || 0).toLocaleString();
+function fmtTime(s) {
+  if (!isFinite(s) || s <= 0) return "–";
+  if (s < 60) return "under a minute";
+  const m = Math.round(s / 60);
+  if (m < 60) return m + " min";
+  return Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
+
+const state = { info: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [] };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+
+function show(name) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
+  const step = STEPS[name] || 0;
+  $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
+  if (name === "old-find") startDiscovery(); else call("stopDiscovery").catch(() => {});
+  if (name === "old-what") loadSizes();
+  document.querySelector("main").scrollTop = 0;
+}
+document.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => show(b.dataset.go)));
+
+// ----- start -----
+async function init() {
+  state.info = await call("init");
+  $("pcName").textContent = state.info.computerName;
+  $("ver").textContent = "v" + state.info.version;
+  $("footLeft").textContent = `${state.info.users.length} ${state.info.users.length === 1 ? "person" : "people"} · ${state.info.appCount} programs on this PC`;
+  show("home");
+}
+
+// ----- old PC: find the new PC -----
+function startDiscovery() {
+  state.target = null; renderFound([]);
+  call("startDiscovery");
+}
+const found = new Map();
+on("receiverFound", m => { found.set(m.address, m); renderFound([...found.values()]); });
+function renderFound(list) {
+  if (list.length === 0) found.clear();
+  $("found").innerHTML = list.map(r => `
+    <div class="pc-row row ${state.target && state.target.address === r.address ? "sel" : ""}" data-addr="${esc(r.address)}">
+      <div class="avatar" style="border-radius:10px"><svg width="20" height="20"><use href="#i-pc"/></svg></div>
+      <div class="grow"><div class="name">${esc(r.name)}</div><div class="sub">${esc(r.address)}</div></div>
+      ${state.target && state.target.address === r.address ? '<span class="pill ok">Selected</span>' : ""}
+    </div>`).join("");
+  $("found").querySelectorAll(".pc-row").forEach(el => el.addEventListener("click", () => { state.target = found.get(el.dataset.addr); renderFound([...found.values()]); updateFindNext(); }));
+  $("searching").style.display = list.length ? "none" : "flex";
+}
+$("useIp").addEventListener("click", () => {
+  const ip = $("manualIp").value.trim();
+  if (!ip) return;
+  const r = { name: ip, address: ip, port: 47800 };
+  found.set(ip, r); state.target = r; renderFound([...found.values()]); updateFindNext();
+});
+(function buildCodeBoxes() {
+  const box = $("codeBoxes");
+  for (let i = 0; i < 6; i++) {
+    if (i === 3) box.insertAdjacentHTML("beforeend", '<span class="gap"></span>');
+    box.insertAdjacentHTML("beforeend", '<input type="text" inputmode="numeric" maxlength="1">');
+  }
+  const inputs = [...box.querySelectorAll("input")];
+  inputs.forEach((inp, i) => {
+    inp.addEventListener("input", () => {
+      inp.value = inp.value.replace(/\D/g, "").slice(-1);
+      if (inp.value && i < 5) inputs[i + 1].focus();
+      state.code = inputs.map(x => x.value).join(""); updateFindNext();
+    });
+    inp.addEventListener("keydown", e => { if (e.key === "Backspace" && !inp.value && i > 0) inputs[i - 1].focus(); });
+    inp.addEventListener("paste", e => {
+      const digits = (e.clipboardData.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+      if (!digits) return; e.preventDefault();
+      inputs.forEach((x, j) => x.value = digits[j] || "");
+      state.code = digits; updateFindNext(); inputs[Math.min(digits.length, 5)].focus();
+    });
+  });
+})();
+function updateFindNext() { $("findNext").disabled = !(state.target && state.code.length === 6); }
+$("findNext").addEventListener("click", () => { state.flow = "send"; show("old-what"); });
+
+// ----- old PC: pick a drive folder -----
+$("pickSave").addEventListener("click", async () => {
+  const r = await call("pickFolder", { purpose: "save" });
+  if (!r) return;
+  state.folder = r.path;
+  $("savePath").textContent = r.path; $("savePath").classList.add("set");
+  const hint = $("saveHint");
+  if (r.hasStore) { hint.textContent = "This folder already holds a finished copy. Pick an empty folder."; hint.className = "hint warn"; $("driveNext").disabled = true; return; }
+  hint.textContent = fmtBytes(r.freeBytes) + " free on this drive"; hint.className = "hint";
+  $("driveNext").disabled = false;
+});
+$("driveNext").addEventListener("click", () => { state.flow = "capture"; show("old-what"); });
+$("whatBack").addEventListener("click", () => show(state.flow === "send" ? "old-find" : "old-drive"));
+
+// ----- old PC: choose people -----
+function loadSizes() {
+  $("whatSub").textContent = state.flow === "send"
+    ? `Sending to ${state.target.name}. Everyone is selected; untick anyone you want to leave behind.`
+    : `Saving to ${state.folder}. Everyone is selected; untick anyone you want to leave behind.`;
+  $("userRows").innerHTML = state.info.users.map(u => `
+    <label class="row" style="cursor:pointer">
+      <input type="checkbox" class="check" data-user="${esc(u.name)}" checked>
+      <div class="avatar">${esc(u.name[0].toUpperCase())}</div>
+      <div class="grow"><div class="name">${esc(u.name)}</div><div class="sub">${esc(u.path)}</div></div>
+      <div class="size" id="size-${esc(u.name)}">${state.sizes[u.name] ? fmtSize(state.sizes[u.name]) : '<span class="shimmer"></span>'}</div>
+    </label>`).join("");
+  $("userRows").querySelectorAll("input").forEach(c => c.addEventListener("change", updateTotal));
+  updateTotal();
+  if (Object.keys(state.sizes).length < state.info.users.length) call("measureUsers");
+}
+const fmtSize = s => `${fmtBytes(s.bytes)}<div class="sub">${fmtNum(s.files)} files</div>`;
+on("userMeasured", m => {
+  state.sizes[m.name] = m;
+  const el = document.getElementById("size-" + m.name);
+  if (el) el.innerHTML = fmtSize(m);
+  updateTotal();
+});
+function selectedUsers() { return [...$("userRows").querySelectorAll("input:checked")].map(c => c.dataset.user); }
+function updateTotal() {
+  const users = selectedUsers();
+  const known = users.every(u => state.sizes[u]);
+  const bytes = users.reduce((a, u) => a + (state.sizes[u] ? state.sizes[u].bytes : 0), 0);
+  $("totalSize").textContent = users.length === 0 ? "Nobody selected" : known ? `About ${fmtBytes(bytes)} to move` : "Measuring…";
+  $("startCapture").disabled = users.length === 0;
+}
+$("startCapture").addEventListener("click", async () => {
+  const users = selectedUsers();
+  const args = {
+    users, wifi: $("optWifi").checked, settings: $("optSettings").checked, shadow: $("optShadow").checked,
+    estimatedBytes: users.reduce((a, u) => a + (state.sizes[u] ? state.sizes[u].bytes : 0), 0),
+  };
+  startProgress(state.flow === "send" ? `Sending to ${state.target.name}` : "Saving to your drive", args.estimatedBytes);
+  try {
+    const r = state.flow === "send"
+      ? await call("send", { ...args, address: state.target.address, port: state.target.port, code: state.code })
+      : await call("capture", { ...args, folder: state.folder });
+    showDone({
+      title: state.flow === "send" ? "Sent!" : "Saved!",
+      sub: state.flow === "send" ? `Everything is on ${state.target.name}. Finish up there.` : "Unplug the drive and plug it into the new PC.",
+      stats: [["Files", fmtNum(r.files)], ["Size", fmtBytes(r.bytes)], ["Time", fmtTime(r.seconds)]],
+      warnings: r.warnings, logPath: r.logPath,
+    });
+  } catch (e) { showError(e); }
+});
+
+// ----- new PC: receive -----
+$("goReceive").addEventListener("click", async () => {
+  try {
+    const r = await call("startReceive");
+    $("bigCode").innerHTML = r.code.split("").map((d, i) => (i === 3 ? '<span class="gap"></span>' : "") + `<span>${d}</span>`).join("");
+    $("rxName").textContent = state.info.computerName;
+    $("rxIps").textContent = r.addresses.length ? "This PC's address: " + r.addresses.join(", ") : "";
+    show("new-receive");
+  } catch (e) { toast(e.message); }
+});
+$("receiveBack").addEventListener("click", () => { call("cancel"); show("new-method"); });
+on("senderConnected", m => startProgress(`Receiving from ${m.name}`, m.estimatedBytes));
+on("received", async m => { state.folder = m.folder; await openStore(m.folder); });
+on("failed", m => {
+  // Pressing Back while waiting cancels the receive; that is not an error worth a screen.
+  if (/cancel/i.test(m.message) && !document.getElementById("s-progress").classList.contains("active")) return;
+  showError(new Error(m.message));
+});
+
+// ----- new PC: drive -----
+$("pickLoad").addEventListener("click", async () => {
+  const r = await call("pickFolder", { purpose: "load" });
+  if (!r) return;
+  $("loadPath").textContent = r.path; $("loadPath").classList.add("set");
+  const hint = $("loadHint");
+  if (!r.hasStore) { hint.textContent = "There's no finished copy in this folder. Pick the folder the old PC saved to."; hint.className = "hint warn"; $("loadNext").disabled = true; return; }
+  hint.textContent = "Found a copy from " + r.fromComputer; hint.className = "hint";
+  state.folder = r.path; $("loadNext").disabled = false;
+});
+$("loadNext").addEventListener("click", () => openStore(state.folder));
+
+async function openStore(folder) {
+  try {
+    const s = state.store = await call("readStore", { folder });
+    $("reviewSub").textContent = `From ${s.fromComputer}, copied ${new Date(s.captured).toLocaleString()}. ${fmtNum(s.files)} files, ${fmtBytes(s.bytes)}.`;
+    const opts = name => `<option value="">Don't copy</option>` + s.targetUsers.map(t => `<option ${t.toLowerCase() === name.toLowerCase() ? "selected" : ""}>${esc(t)}</option>`).join("");
+    $("mapRows").innerHTML = s.users.map(u => `
+      <div class="row">
+        <div class="avatar">${esc(u.name[0].toUpperCase())}</div>
+        <div class="grow"><div class="name">${esc(u.name)}</div><div class="sub">${fmtNum(u.files)} files · ${fmtBytes(u.bytes)}</div></div>
+        <span class="faint">→</span>
+        <select data-user="${esc(u.name)}" style="min-width:200px">${opts(u.name)}</select>
+      </div>`).join("");
+    $("mapRows").querySelectorAll("select").forEach(sel => {
+      if (!sel.value && s.targetUsers.length === 1) sel.value = s.targetUsers[0];
+    });
+    show("new-review");
+  } catch (e) { showError(e); }
+}
+$("startApply").addEventListener("click", async () => {
+  const map = {};
+  $("mapRows").querySelectorAll("select").forEach(sel => map[sel.dataset.user] = sel.value);
+  startProgress("Putting everything in place", state.store.bytes);
+  try {
+    const r = await call("apply", { folder: state.folder, map, conflicts: $("conflicts").value });
+    showDone({
+      title: "Welcome to your new PC",
+      sub: "Sign out and back in to see your wallpaper and mapped drives.",
+      stats: [["Files copied", fmtNum(r.copied)], ["Size", fmtBytes(r.bytes)], ["Already up to date", fmtNum(r.skipped)]],
+      warnings: r.warnings, apps: r.apps, reportPath: r.reportPath,
+    });
+  } catch (e) { showError(e); }
+});
+
+// ----- progress -----
+let prog = { start: 0, total: 0 };
+function startProgress(title, totalBytes) {
+  prog = { start: performance.now(), total: totalBytes || 0, warn: 0 };
+  state.warnings = [];
+  $("progTitle").textContent = title;
+  $("ring").classList.toggle("indeterminate", !prog.total);
+  setRing(prog.total ? 0 : 0.22);
+  $("pct").textContent = prog.total ? "0%" : "";
+  ["stFiles"].forEach(id => $(id).textContent = "0");
+  $("stBytes").textContent = "0 B"; $("stSpeed").textContent = "–"; $("stEta").textContent = "–";
+  $("phaseText").textContent = "Getting ready…"; $("current").innerHTML = "&nbsp;"; $("warnPill").innerHTML = "";
+  $("cancel").disabled = false;
+  show("progress");
+}
+function setRing(f) { $("ringBar").style.strokeDashoffset = 326.7 * (1 - Math.max(0, Math.min(1, f))); }
+on("progress", m => {
+  const secs = (performance.now() - prog.start) / 1000;
+  const rate = m.bytes / Math.max(secs, 0.5);
+  $("stFiles").textContent = fmtNum(m.files);
+  $("stBytes").textContent = fmtBytes(m.bytes);
+  $("stSpeed").textContent = fmtBytes(rate) + "/s";
+  $("current").textContent = m.path;
+  if (prog.total) {
+    const f = Math.min(m.bytes / prog.total, 0.99);
+    setRing(f); $("pct").textContent = Math.floor(f * 100) + "%";
+    $("stEta").textContent = fmtTime((prog.total - m.bytes) / rate);
+  }
+});
+on("log", m => { $("phaseText").textContent = m.message; });
+on("warning", m => {
+  state.warnings.push(m.message);
+  $("warnPill").innerHTML = `<span class="pill warn">${state.warnings.length} ${state.warnings.length === 1 ? "file" : "files"} skipped</span>`;
+});
+$("cancel").addEventListener("click", () => { $("cancel").disabled = true; $("phaseText").textContent = "Stopping…"; call("cancel"); });
+
+// ----- done -----
+function showDone(d) {
+  $("doneBadge").className = "badge"; $("doneBadge").innerHTML = '<svg><use href="#i-check"/></svg>';
+  $("doneTitle").textContent = d.title; $("doneSub").textContent = d.sub;
+  $("doneStats").innerHTML = d.stats.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+  $("doneStats").style.display = "";
+  const apps = d.apps || [];
+  $("appsCard").style.display = apps.length ? "" : "none";
+  $("appsTitle").textContent = `Programs to install on this PC (${apps.length})`;
+  $("apps").innerHTML = apps.map(a => `<div class="app"><div class="dot">${esc(a.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?")}</div><div class="t"><div>${esc(a.name)}</div><div class="p">${esc(a.publisher || "")}</div></div></div>`).join("");
+  const w = d.warnings || [];
+  $("warnBox").style.display = w.length ? "" : "none";
+  $("warnSummary").textContent = `${w.length} ${w.length === 1 ? "thing" : "things"} couldn't be copied. Show details`;
+  $("warnList").innerHTML = w.map(x => `<div>${esc(x)}</div>`).join("");
+  const report = d.reportPath || d.logPath;
+  $("openReport").style.display = report ? "" : "none";
+  $("openReport").onclick = () => call("openPath", { path: report });
+  show("done");
+}
+function showError(e) {
+  $("doneBadge").className = "badge bad"; $("doneBadge").innerHTML = '<svg><use href="#i-x"/></svg>';
+  $("doneTitle").textContent = /cancel/i.test(e.message) ? "Stopped" : "Something went wrong";
+  $("doneSub").textContent = e.message;
+  $("doneStats").style.display = "none"; $("appsCard").style.display = "none"; $("warnBox").style.display = "none"; $("openReport").style.display = "none";
+  show("done");
+}
+$("finish").addEventListener("click", () => call("close"));
+
+// ---------------------------------------------------------------------------
+// Mock host for designing in a browser. Not used inside the app.
+// ---------------------------------------------------------------------------
+const Mock = {
+  handle({ id, cmd, args }) {
+    const reply = (result, delay = 150) => setTimeout(() => receive({ id, result }), delay);
+    const emit = (event, data, delay) => setTimeout(() => receive({ event, ...data }), delay);
+    switch (cmd) {
+      case "init": return reply({ computerName: "TYLOR-DESKTOP", version: "0.1.0", appCount: 87, users: [{ name: "tylor", path: "C:\\Users\\tylor" }, { name: "Sam", path: "C:\\Users\\Sam" }, { name: "guest", path: "C:\\Users\\guest" }] }, 0);
+      case "startDiscovery":
+        emit("receiverFound", { name: "TYLOR-LAPTOP", address: "192.168.1.42", port: 47800 }, 900);
+        emit("receiverFound", { name: "OFFICE-PC", address: "192.168.1.77", port: 47800 }, 1700);
+        return reply(null);
+      case "measureUsers":
+        emit("userMeasured", { name: "tylor", files: 48211, bytes: 61.4e9 }, 700);
+        emit("userMeasured", { name: "Sam", files: 9120, bytes: 8.2e9 }, 1100);
+        emit("userMeasured", { name: "guest", files: 41, bytes: 3.1e6 }, 400);
+        return reply(null);
+      case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, fromComputer: "TYLOR-DESKTOP" });
+      case "startReceive": return reply({ code: "482913", addresses: ["192.168.1.42"] });
+      case "readStore": return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"] });
+      case "capture": case "send": case "apply": {
+        const total = args.estimatedBytes || 69.6e9; let b = 0, f = 0;
+        const t = setInterval(() => { b += total / 40; f += 1300; receive({ event: "progress", files: f, bytes: b, path: "C:\\Users\\tylor\\Documents\\Taxes\\2023\\return-final.pdf" }); if (b >= total) clearInterval(t); }, 120);
+        emit("log", { message: "Copying files for tylor…" }, 300);
+        emit("warning", { message: "Could not copy C:\\Users\\tylor\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\LOCK: in use" }, 2000);
+        return reply(cmd === "apply"
+          ? { copied: 57210, skipped: 162, failed: 0, bytes: 69.6e9, warnings: ["No user 'guest' on this PC, so guest's files were skipped."], reportPath: "E:\\Migration\\apply-report.txt",
+              apps: ["Spotify|Spotify AB", "Steam|Valve Corporation", "VLC media player|VideoLAN", "Zoom Workplace|Zoom Communications", "Adobe Acrobat Reader|Adobe", "Discord|Discord Inc."].map(s => ({ name: s.split("|")[0], publisher: s.split("|")[1] })) }
+          : { files: 57372, bytes: 69.6e9, seconds: 1460, warnings: ["Could not copy ...\\LOCK: in use"], logPath: "E:\\Migration\\pcmigrate.log" }, 5200);
+      }
+      default: return reply(null);
+    }
+  },
+};
+if (!webview) window.Mock = Mock;
+init().catch(e => toast(e.message));
+</script>
+</body>
+</html>

@@ -4,7 +4,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <RootNamespace>PcMigrate.Cli</RootNamespace>
-    <AssemblyName>pcmigrate</AssemblyName>
+    <AssemblyName>pcmigrate-cli</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>

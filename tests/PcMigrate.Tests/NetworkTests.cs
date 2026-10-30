@@ -125,3 +125,30 @@ public class NetworkTests
         public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
     }
 }
+
+public class DiscoveryTests
+{
+    [Fact]
+    public async Task OldPcFindsNewPc()
+    {
+        var udpPort = FreeUdpPort();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var responder = Discovery.RespondAsync(47800, cts.Token, udpPort);
+
+        var found = new TaskCompletionSource<DiscoveredReceiver>();
+        var scanning = Discovery.ScanAsync(r => found.TrySetResult(r), cts.Token, udpPort, [System.Net.IPAddress.Loopback]);
+
+        var receiver = await found.Task.WaitAsync(cts.Token);
+        Assert.Equal(Environment.MachineName, receiver.Name);
+        Assert.Equal(47800, receiver.Port);
+        cts.Cancel();
+        await scanning;
+        await responder;
+    }
+
+    private static int FreeUdpPort()
+    {
+        using var u = new System.Net.Sockets.UdpClient(0);
+        return ((System.Net.IPEndPoint)u.Client.LocalEndPoint!).Port;
+    }
+}

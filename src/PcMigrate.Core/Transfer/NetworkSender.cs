@@ -18,7 +18,7 @@ public sealed class NetworkSender : IMigrationSink
         _stream = stream;
     }
 
-    public static async Task<NetworkSender> ConnectAsync(string host, int port, string pairingCode, CancellationToken ct = default)
+    public static async Task<NetworkSender> ConnectAsync(string host, int port, string pairingCode, CancellationToken ct = default, long estimatedBytes = 0)
     {
         var client = new TcpClient { NoDelay = true, SendBufferSize = 4 * 1024 * 1024 };
         try
@@ -33,6 +33,7 @@ public sealed class NetworkSender : IMigrationSink
                 PairingCode = pairingCode.Trim(),
                 ComputerName = Environment.MachineName,
                 ToolVersion = ToolInfo.Version,
+                EstimatedBytes = estimatedBytes,
             }), ct);
             await stream.FlushAsync(ct);
 

@@ -61,7 +61,7 @@ async Task<int> Run(string[] argv)
             "send" => await Send(),
             "receive" => await Receive(),
             "apply" => await Apply(cli.Require("from")),
-            _ => Fail($"Unknown command '{cli.Command}'. Run 'pcmigrate help'."),
+            _ => Fail($"Unknown command '{cli.Command}'. Run 'pcmigrate-cli help'."),
         };
     }
     catch (OperationCanceledException)
@@ -91,15 +91,7 @@ async Task<int> Run(string[] argv)
         Console.WriteLine("Users and how much would be copied:");
         foreach (var user in inventory.Users)
         {
-            long files = 0, bytes = 0;
-            foreach (var folder in rules.ProfileFolders)
-            {
-                foreach (var f in FileCollector.Enumerate(Path.Combine(user.ProfilePath, folder), folder, rules, _ => { }))
-                {
-                    files++;
-                    bytes += f.Length;
-                }
-            }
+            var (files, bytes) = CaptureEngine.Estimate(user, rules);
             Console.WriteLine($"  {user.UserName,-24} {files,10:N0} files  {CaptureEngine.FormatBytes(bytes),10}   {user.ProfilePath}");
         }
         Console.WriteLine();
@@ -128,7 +120,7 @@ async Task<int> Run(string[] argv)
 
         await using var sink = new FolderSink(to);
         var manifest = await new CaptureEngine(probe, log).RunAsync(sink, options, cts.Token);
-        return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate apply --from \"{sink.Root}\"", manifest.Warnings.Count);
+        return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate-cli apply --from \"{sink.Root}\"", manifest.Warnings.Count);
     }
 
     async Task<int> Send()
@@ -157,18 +149,22 @@ async Task<int> Run(string[] argv)
         using var receiver = new NetworkReceiver(to, code, log);
         receiver.Start(port);
         using var firewall = FirewallRule.Open(port, log);
+        using var discoveryStop = new CancellationTokenSource();
+        var discovery = Discovery.RespondAsync(port, discoveryStop.Token);
 
         Console.WriteLine();
         Console.WriteLine("Waiting for the old PC. On it, run:");
         foreach (var ip in NetworkReceiver.LocalAddresses())
-            Console.WriteLine($"    pcmigrate send --host {ip} --code {code}{(port == NetworkReceiver.DefaultPort ? "" : " --port " + port)}");
+            Console.WriteLine($"    pcmigrate-cli send --host {ip} --code {code}{(port == NetworkReceiver.DefaultPort ? "" : " --port " + port)}");
         Console.WriteLine();
         Console.WriteLine($"Pairing code: {code}");
         Console.WriteLine();
 
         await receiver.ReceiveAsync(cts.Token);
+        discoveryStop.Cancel();
+        await discovery;
         log.Info($"Transfer finished. Saved to {to}");
-        return applyAfter ? await Apply(to, applyOptions) : Done($"Run 'pcmigrate apply --from \"{to}\"' when ready.", 0);
+        return applyAfter ? await Apply(to, applyOptions) : Done($"Run 'pcmigrate-cli apply --from \"{to}\"' when ready.", 0);
     }
 
     ApplyOptions ReadApplyOptions()
@@ -240,16 +236,16 @@ async Task<int> Run(string[] argv)
             pc-migrate {ToolInfo.Version}: move files and settings from an old Windows PC to a new one.
 
             Using an external drive:
-              On the old PC:  pcmigrate capture --to E:\migration
-              On the new PC:  pcmigrate apply --from E:\migration
+              On the old PC:  pcmigrate-cli capture --to E:\migration
+              On the new PC:  pcmigrate-cli apply --from E:\migration
 
             Over the network (both PCs on the same network):
-              On the new PC:  pcmigrate receive          (shows a pairing code)
-              On the old PC:  pcmigrate send --host <new PC's IP> --code <code>
+              On the new PC:  pcmigrate-cli receive      (shows a pairing code)
+              On the old PC:  pcmigrate-cli send --host <new PC's IP> --code <code>
 
             Other commands:
-              pcmigrate scan [--json]      List users, how much would be copied, and installed programs.
-              pcmigrate version
+              pcmigrate-cli scan [--json]  List users, how much would be copied, and installed programs.
+              pcmigrate-cli version
 
             Options for capture and send:
               --user <name>[,<name>]       Only these users (default: everyone).

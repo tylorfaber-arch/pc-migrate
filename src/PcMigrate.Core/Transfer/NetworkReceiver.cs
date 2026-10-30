@@ -17,6 +17,9 @@ public sealed class NetworkReceiver(string storeRoot, string pairingCode, IMigra
     private const int MaxBadAttempts = 5;
     private TcpListener? _listener;
 
+    /// <summary>Raised once the old PC has connected with the right code: its name and estimated size.</summary>
+    public event Action<string, long>? Connected;
+
     public static string NewPairingCode() => RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
 
     /// <summary>Starts listening and returns the port (useful when 0 was asked for).</summary>
@@ -64,6 +67,7 @@ public sealed class NetworkReceiver(string storeRoot, string pairingCode, IMigra
 
             await ReplyAsync(stream, true, $"Connected to {Environment.MachineName}.", ct);
             log.Info($"Connected to {hello.ComputerName} ({remote}). Receiving...");
+            Connected?.Invoke(hello.ComputerName, hello.EstimatedBytes);
             return await ReceiveFramesAsync(stream, ct);
         }
     }

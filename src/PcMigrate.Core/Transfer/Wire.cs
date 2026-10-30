@@ -91,6 +91,8 @@ internal sealed class Hello
     public required string PairingCode { get; init; }
     public required string ComputerName { get; init; }
     public required string ToolVersion { get; init; }
+    /// <summary>Roughly how much the sender is about to send, so the receiver can show a percentage. 0 if unknown.</summary>
+    public long EstimatedBytes { get; init; }
 }
 
 /// <summary>Reads one file's chunks off the wire as an ordinary stream.</summary>

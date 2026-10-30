@@ -194,6 +194,23 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log)
         }
     }
 
+    /// <summary>How many files and bytes a capture of this user would copy.</summary>
+    public static (long Files, long Bytes) Estimate(UserProfileInfo user, CaptureRules rules, CancellationToken ct = default)
+    {
+        long files = 0, bytes = 0;
+        foreach (var folder in rules.ProfileFolders)
+        {
+            var path = Path.Combine(user.ProfilePath, folder.Replace('/', Path.DirectorySeparatorChar));
+            foreach (var f in FileCollector.Enumerate(path, folder, rules, _ => { }))
+            {
+                ct.ThrowIfCancellationRequested();
+                files++;
+                bytes += f.Length;
+            }
+        }
+        return (files, bytes);
+    }
+
     public static string FormatBytes(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];
