@@ -15,6 +15,8 @@ public sealed class Manifest
     public List<UserSettings> UserSettings { get; init; } = [];
     /// <summary>Store paths of exported Wi-Fi profiles (netsh XML).</summary>
     public List<string> WifiProfiles { get; init; } = [];
+    /// <summary>Every program looked at, including the ones that have to be installed by hand.</summary>
+    public List<Apps.AppEntry> Apps { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
     public bool UsedShadowCopy { get; set; }
 }

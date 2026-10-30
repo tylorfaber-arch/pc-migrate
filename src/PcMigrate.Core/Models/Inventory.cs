@@ -29,7 +29,10 @@ public sealed class InstalledApp
     /// <summary>"Machine" for all-users installs, otherwise the user name it was installed for.</summary>
     public required string Scope { get; init; }
     public bool Is64Bit { get; init; }
+    /// <summary>Full path of its Uninstall entry, e.g. HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{id}.</summary>
     public required string RegistryKey { get; init; }
+    /// <summary>Installed by Windows Installer (an .msi). Those cannot safely be moved by copying.</summary>
+    public bool IsMsi { get; init; }
 }
 
 /// <summary>Everything the scanner learned about a machine.</summary>

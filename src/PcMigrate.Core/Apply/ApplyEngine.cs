@@ -1,5 +1,5 @@
 using System.Text;
-using System.Text.RegularExpressions;
+using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
@@ -25,6 +25,9 @@ public sealed class ApplyOptions
     public bool IncludeWifi { get; init; } = true;
     public bool IncludeUserSettings { get; init; } = true;
     public bool DryRun { get; init; }
+    public bool IncludeApps { get; init; } = true;
+    /// <summary>Keys of the programs to install or copy. Null means every program that can move.</summary>
+    public IReadOnlySet<string>? AppKeys { get; init; }
 }
 
 public sealed class ApplyResult
@@ -34,13 +37,16 @@ public sealed class ApplyResult
     public long FilesFailed { get; set; }
     public long BytesCopied { get; set; }
     public List<string> MissingUsers { get; } = [];
+    /// <summary>What happened to each program the old PC had a plan for.</summary>
+    public List<AppResult> Apps { get; } = [];
+    /// <summary>Programs from the old PC that still aren't on this one.</summary>
     public List<InstalledApp> AppsToReinstall { get; } = [];
     public List<string> Warnings { get; } = [];
     public string? ReportPath { get; set; }
 }
 
 /// <summary>Puts a migration store onto this (new) PC.</summary>
-public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log)
+public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatform? apps = null)
 {
     public async Task<ApplyResult> RunAsync(string storeRoot, ApplyOptions options, CancellationToken ct = default)
     {
@@ -82,7 +88,15 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log)
             if (options.IncludeWifi) RestoreWifi(storeRoot, manifest);
         }
 
-        result.AppsToReinstall.AddRange(FindMissingApps(source.Apps, target.Apps));
+        if (options.IncludeApps && manifest.Apps.Count > 0)
+            result.Apps.AddRange(await new AppRestore(apps, log, Warn).RunAsync(storeRoot, manifest, target, FindTarget, options, ct));
+
+        var handled = result.Apps
+            .Where(a => a.Outcome is AppOutcome.Installed or AppOutcome.Copied or AppOutcome.AlreadyInstalled)
+            .Select(a => AppNames.Normalize(a.Name))
+            .ToHashSet();
+        result.AppsToReinstall.AddRange(FindMissingApps(source.Apps.Where(a => !AppPlanner.IsHidden(a)), target.Apps)
+            .Where(a => !handled.Contains(AppNames.Normalize(a.Name))));
         result.ReportPath = WriteReport(storeRoot, manifest, result, options);
         return result;
     }
@@ -115,39 +129,51 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log)
                 continue;
             }
 
-            var temp = destination + ".pcmigrate-partial";
-            try
+            if (await CopyFromStoreAsync(storeRoot, file, destination, warn, ct))
             {
-                var sourcePath = StorePath.ToLocal(storeRoot, file.StorePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                FileWriteResult written;
-                await using (var input = HashingCopy.OpenForRead(sourcePath))
-                await using (var output = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 0, FileOptions.Asynchronous))
-                {
-                    written = await HashingCopy.CopyAsync(input, output, ct);
-                }
-
-                // Catches a damaged external drive or a store edited by hand.
-                if (!string.Equals(written.Sha256, file.Sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    File.Delete(temp);
-                    result.FilesFailed++;
-                    warn($"Skipped damaged file in the store: {file.StorePath}");
-                    continue;
-                }
-
-                File.Move(temp, destination, overwrite: true);
-                File.SetLastWriteTimeUtc(destination, file.LastWriteUtc);
                 result.FilesCopied++;
-                result.BytesCopied += written.Length;
+                result.BytesCopied += file.Length;
                 log.FileProgress(result.FilesCopied, result.BytesCopied, destination);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SinkWriteException)
+            else
             {
-                try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
                 result.FilesFailed++;
-                warn($"Could not write {destination}: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>Copies one file out of the store, checking it against the manifest's checksum.</summary>
+    internal static async Task<bool> CopyFromStoreAsync(string storeRoot, ManifestFile file, string destination, Action<string> warn, CancellationToken ct)
+    {
+        var temp = destination + ".pcmigrate-partial";
+        try
+        {
+            var sourcePath = StorePath.ToLocal(storeRoot, file.StorePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            FileWriteResult written;
+            await using (var input = HashingCopy.OpenForRead(sourcePath))
+            await using (var output = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 0, FileOptions.Asynchronous))
+            {
+                written = await HashingCopy.CopyAsync(input, output, ct);
+            }
+
+            // Catches a damaged external drive or a store edited by hand.
+            if (!string.Equals(written.Sha256, file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(temp);
+                warn($"Skipped damaged file in the store: {file.StorePath}");
+                return false;
+            }
+
+            File.Move(temp, destination, overwrite: true);
+            File.SetLastWriteTimeUtc(destination, file.LastWriteUtc);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SinkWriteException)
+        {
+            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            warn($"Could not write {destination}: {ex.Message}");
+            return false;
         }
     }
 
@@ -197,15 +223,7 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log)
             .OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>"Google Chrome 118.0.1 (64-bit)" and "Google Chrome" should count as the same program.</summary>
-    internal static string NormalizeAppName(string name)
-    {
-        var s = name.ToLowerInvariant();
-        s = Regex.Replace(s, @"\((x64|x86|64-bit|32-bit|64 bit|32 bit)\)|\b(x64|x86|amd64)\b", " ");
-        s = Regex.Replace(s, @"\bv?\d+(\.\d+)+\b|\(\s*\)", " ");
-        s = Regex.Replace(s, @"[^\p{L}\p{N}+#]+", " ");
-        return Regex.Replace(s, @"\s+", " ").Trim();
-    }
+    internal static string NormalizeAppName(string name) => AppNames.Normalize(name);
 
     private string? WriteReport(string storeRoot, Manifest manifest, ApplyResult result, ApplyOptions options)
     {
@@ -218,6 +236,13 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log)
         sb.AppendLine($"Files failed:  {result.FilesFailed:N0}");
         if (result.MissingUsers.Count > 0) sb.AppendLine($"Users not found on this PC: {string.Join(", ", result.MissingUsers)}");
         sb.AppendLine();
+        if (result.Apps.Count > 0)
+        {
+            sb.AppendLine("Programs:");
+            foreach (var app in result.Apps.Where(a => a.Outcome != AppOutcome.Manual))
+                sb.AppendLine($"  {app.Outcome,-16} {app.Name}{(app.Message is null ? "" : "  (" + app.Message + ")")}");
+            sb.AppendLine();
+        }
         sb.AppendLine($"Programs on the old PC that are not installed here ({result.AppsToReinstall.Count}):");
         foreach (var app in result.AppsToReinstall)
             sb.AppendLine($"  - {app.Name}{(app.Version is null ? "" : " " + app.Version)}{(app.Publisher is null ? "" : "  [" + app.Publisher + "]")}");

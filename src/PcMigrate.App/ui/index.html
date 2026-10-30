@@ -262,6 +262,24 @@ summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 .shimmer { display: inline-block; width: 80px; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--border), var(--surface-2), var(--border)); background-size: 200% 100%; animation: sh 1.2s linear infinite; vertical-align: middle; }
 @keyframes sh { to { background-position: -200% 0; } }
+.badge-m { flex: none; font-size: 11px; font-weight: 650; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.badge-m.Reinstall { background: var(--ok-soft); color: var(--ok); }
+.badge-m.Copy { background: var(--warn-soft); color: var(--warn); }
+.badge-m.Manual { background: #fde8e8; color: var(--bad); }
+@media (prefers-color-scheme: dark) { .badge-m.Manual { background: #3a1d1f; } }
+.app-list { max-height: 330px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+.app-list .row { padding: 9px 4px; }
+.app-list .row .sub { white-space: normal; }
+.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.card-head h2 { margin: 0; }
+.card-head .spacer { flex: 1; }
+.legend { display: flex; gap: 6px; flex-wrap: wrap; }
+.linkish { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 0; }
+.result-list .row { padding: 9px 4px; }
+.res-icon { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.res-icon svg { width: 15px; height: 15px; }
+.res-icon.ok { background: var(--ok-soft); color: var(--ok); }
+.res-icon.bad { background: #fde8e8; color: var(--bad); }
 footer { padding: 10px 28px; color: var(--faint); font-size: 12px; display: flex; gap: 16px; border-top: 1px solid var(--border); background: var(--surface); }
 footer .grow { flex: 1; }
 </style>
@@ -365,6 +383,12 @@ footer .grow { flex: 1; }
     <div class="title"><h1>What should we move?</h1><p id="whatSub">Everyone's files are selected. Untick anyone you want to leave behind.</p></div>
     <div class="card"><h2>People</h2><div class="rows" id="userRows"></div></div>
     <div class="card">
+      <div class="card-head"><h2>Programs</h2><span class="spacer"></span><div class="legend" id="appLegend"></div></div>
+      <div id="appsLoading" class="waiting" style="margin:4px 0 10px;justify-content:flex-start"><span class="pulse"></span>Checking which programs can move…</div>
+      <div class="app-list rows" id="appRows"></div>
+      <details id="manualBox" style="display:none"><summary id="manualSummary"></summary><div class="app-list rows" id="manualRows"></div></details>
+    </div>
+    <div class="card">
       <h2>Settings</h2>
       <label class="toggle-row"><div class="grow"><div>Wi-Fi networks and passwords</div><div class="sub">So the new PC connects on its own</div></div><input type="checkbox" class="switch" id="optWifi" checked></label>
       <label class="toggle-row"><div class="grow"><div>Wallpaper and mapped network drives</div><div class="sub">Per person</div></div><input type="checkbox" class="switch" id="optSettings" checked></label>
@@ -422,6 +446,10 @@ footer .grow { flex: 1; }
       <p class="muted" style="margin:-4px 0 6px">Each person from the old PC goes into an account on this PC.</p>
       <div class="rows" id="mapRows"></div>
     </div>
+    <div class="card" id="reviewAppsCard" style="display:none">
+      <div class="card-head"><h2>Programs</h2><span class="spacer"></span><span class="muted" id="reviewAppsNote"></span></div>
+      <div class="app-list rows" id="reviewApps"></div>
+    </div>
     <div class="card">
       <h2>If a file is already on this PC</h2>
       <select id="conflicts" style="width:100%">
@@ -463,9 +491,13 @@ footer .grow { flex: 1; }
       <p class="muted" id="doneSub"></p>
     </div>
     <div class="summary" id="doneStats"></div>
-    <div class="card" id="appsCard" style="margin-top:18px;display:none">
-      <h2 id="appsTitle">Programs to install on this PC</h2>
-      <p class="muted" style="margin:-4px 0 12px">These were on the old PC. Programs aren't moved yet, so install the ones you still need.</p>
+    <div class="card" id="progCard" style="margin-top:18px;display:none">
+      <h2 id="progCardTitle">Programs</h2>
+      <div class="rows result-list app-list" id="progResults"></div>
+    </div>
+    <div class="card" id="appsCard" style="margin-top:14px;display:none">
+      <h2 id="appsTitle">Install these yourself</h2>
+      <p class="muted" style="margin:-4px 0 12px">These were on the old PC but couldn't be brought over automatically.</p>
       <div class="apps" id="apps"></div>
     </div>
     <details id="warnBox" style="display:none"><summary id="warnSummary"></summary><div class="warn-list" id="warnList"></div></details>
@@ -610,7 +642,38 @@ $("driveNext").addEventListener("click", () => { state.flow = "capture"; show("o
 $("whatBack").addEventListener("click", () => show(state.flow === "send" ? "old-find" : "old-drive"));
 
 // ----- old PC: choose people -----
+const METHOD_LABEL = { Reinstall: "Reinstall + settings", Copy: "Copy as is", Manual: "Do by hand" };
+const badge = m => `<span class="badge-m ${m}">${METHOD_LABEL[m]}</span>`;
+let appPlans = null;
+function loadApps() {
+  if (appPlans) return renderApps();
+  call("planApps").then(list => { appPlans = list; renderApps(); }).catch(e => {
+    $("appsLoading").innerHTML = `<span class="faint">Couldn't check programs: ${esc(e.message)}</span>`;
+  });
+}
+function appRow(a, { checkbox = true, checked = true, disabled = false, sub } = {}) {
+  return `<label class="row" style="${disabled ? "" : "cursor:pointer"}">
+    ${checkbox ? `<input type="checkbox" class="check" data-app="${esc(a.key)}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>` : ""}
+    <div class="grow"><div class="name" style="font-weight:500">${esc(a.name)}</div><div class="sub">${esc(sub ?? a.reason)}</div></div>
+    ${badge(a.method)}
+  </label>`;
+}
+function renderApps() {
+  $("appsLoading").style.display = "none";
+  const movable = appPlans.filter(a => a.method !== "Manual"), manual = appPlans.filter(a => a.method === "Manual");
+  const count = m => appPlans.filter(a => a.method === m).length;
+  $("appLegend").innerHTML = ["Reinstall", "Copy", "Manual"].filter(count).map(m => `<span class="badge-m ${m}">${count(m)} ${METHOD_LABEL[m].toLowerCase()}</span>`).join("");
+  $("appRows").innerHTML = movable.length
+    ? movable.map(a => appRow(a, { sub: (a.publisher ? a.publisher + " · " : "") + (a.method === "Reinstall" ? "Fresh install on the new PC, with your settings" : "Program folder and settings copied") })).join("")
+    : '<p class="muted" style="padding:6px 0">No programs can be moved automatically from this PC.</p>';
+  $("manualBox").style.display = manual.length ? "" : "none";
+  $("manualSummary").textContent = `${manual.length} ${manual.length === 1 ? "program needs" : "programs need"} installing by hand. Show why`;
+  $("manualRows").innerHTML = manual.map(a => appRow(a, { checkbox: false })).join("");
+}
+function selectedApps() { return [...$("appRows").querySelectorAll("input:checked")].map(c => c.dataset.app); }
+
 function loadSizes() {
+  loadApps();
   $("whatSub").textContent = state.flow === "send"
     ? `Sending to ${state.target.name}. Everyone is selected; untick anyone you want to leave behind.`
     : `Saving to ${state.folder}. Everyone is selected; untick anyone you want to leave behind.`;
@@ -643,7 +706,7 @@ function updateTotal() {
 $("startCapture").addEventListener("click", async () => {
   const users = selectedUsers();
   const args = {
-    users, wifi: $("optWifi").checked, settings: $("optSettings").checked, shadow: $("optShadow").checked,
+    users, apps: selectedApps(), wifi: $("optWifi").checked, settings: $("optSettings").checked, shadow: $("optShadow").checked,
     estimatedBytes: users.reduce((a, u) => a + (state.sizes[u] ? state.sizes[u].bytes : 0), 0),
   };
   startProgress(state.flow === "send" ? `Sending to ${state.target.name}` : "Saving to your drive", args.estimatedBytes);
@@ -706,6 +769,12 @@ async function openStore(folder) {
     $("mapRows").querySelectorAll("select").forEach(sel => {
       if (!sel.value && s.targetUsers.length === 1) sel.value = s.targetUsers[0];
     });
+    const movable = (s.apps || []).filter(a => a.method !== "Manual");
+    $("reviewAppsCard").style.display = movable.length ? "" : "none";
+    $("reviewAppsNote").textContent = `${movable.length} to bring over`;
+    $("reviewApps").innerHTML = movable.map(a => appRow(a, {
+      sub: a.alreadyInstalled ? "Already on this PC. Only its settings are copied." : a.method === "Reinstall" ? "Installed fresh, then your settings are copied" : "Program folder and settings copied from the old PC",
+    })).join("");
     show("new-review");
   } catch (e) { showError(e); }
 }
@@ -714,12 +783,13 @@ $("startApply").addEventListener("click", async () => {
   $("mapRows").querySelectorAll("select").forEach(sel => map[sel.dataset.user] = sel.value);
   startProgress("Putting everything in place", state.store.bytes);
   try {
-    const r = await call("apply", { folder: state.folder, map, conflicts: $("conflicts").value });
+    const apps = [...$("reviewApps").querySelectorAll("input:checked")].map(c => c.dataset.app);
+    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value });
     showDone({
       title: "Welcome to your new PC",
       sub: "Sign out and back in to see your wallpaper and mapped drives.",
       stats: [["Files copied", fmtNum(r.copied)], ["Size", fmtBytes(r.bytes)], ["Already up to date", fmtNum(r.skipped)]],
-      warnings: r.warnings, apps: r.apps, reportPath: r.reportPath,
+      warnings: r.warnings, apps: r.apps, programs: r.programs, reportPath: r.reportPath,
     });
   } catch (e) { showError(e); }
 });
@@ -766,10 +836,19 @@ function showDone(d) {
   $("doneTitle").textContent = d.title; $("doneSub").textContent = d.sub;
   $("doneStats").innerHTML = d.stats.map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
   $("doneStats").style.display = "";
+  const programs = d.programs || [];
+  const OUT = { Installed: "Installed, with your settings", Copied: "Copied from the old PC", AlreadyInstalled: "Already here, settings copied" };
+  $("progCard").style.display = programs.length ? "" : "none";
+  const okCount = programs.filter(p => p.outcome !== "Failed").length;
+  $("progCardTitle").textContent = `Programs (${okCount} of ${programs.length} brought over)`;
+  $("progResults").innerHTML = programs.map(p => `<div class="row">
+      <div class="res-icon ${p.outcome === "Failed" ? "bad" : "ok"}"><svg><use href="#${p.outcome === "Failed" ? "i-x" : "i-check"}"/></svg></div>
+      <div class="grow"><div class="name" style="font-weight:500">${esc(p.name)}</div><div class="sub">${esc(p.outcome === "Failed" ? p.message : OUT[p.outcome])}</div></div>
+    </div>`).join("");
   const apps = d.apps || [];
   $("appsCard").style.display = apps.length ? "" : "none";
-  $("appsTitle").textContent = `Programs to install on this PC (${apps.length})`;
-  $("apps").innerHTML = apps.map(a => `<div class="app"><div class="dot">${esc(a.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?")}</div><div class="t"><div>${esc(a.name)}</div><div class="p">${esc(a.publisher || "")}</div></div></div>`).join("");
+  $("appsTitle").textContent = `Install these yourself (${apps.length})`;
+  $("apps").innerHTML = apps.map(a => `<div class="app" title="${esc(a.reason || "")}"><div class="dot">${esc(a.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?")}</div><div class="t"><div>${esc(a.name)}</div><div class="p">${esc(a.reason || a.publisher || "")}</div></div></div>`).join("");
   const w = d.warnings || [];
   $("warnBox").style.display = w.length ? "" : "none";
   $("warnSummary").textContent = `${w.length} ${w.length === 1 ? "thing" : "things"} couldn't be copied. Show details`;
@@ -783,7 +862,7 @@ function showError(e) {
   $("doneBadge").className = "badge bad"; $("doneBadge").innerHTML = '<svg><use href="#i-x"/></svg>';
   $("doneTitle").textContent = /cancel/i.test(e.message) ? "Stopped" : "Something went wrong";
   $("doneSub").textContent = e.message;
-  $("doneStats").style.display = "none"; $("appsCard").style.display = "none"; $("warnBox").style.display = "none"; $("openReport").style.display = "none";
+  $("doneStats").style.display = "none"; $("appsCard").style.display = "none"; $("progCard").style.display = "none"; $("warnBox").style.display = "none"; $("openReport").style.display = "none";
   show("done");
 }
 $("finish").addEventListener("click", () => call("close"));
@@ -791,6 +870,14 @@ $("finish").addEventListener("click", () => call("close"));
 // ---------------------------------------------------------------------------
 // Mock host for designing in a browser. Not used inside the app.
 // ---------------------------------------------------------------------------
+const MOCK_APPS = [
+  ["Discord", "Discord Inc.", "Reinstall"], ["Google Chrome", "Google LLC", "Reinstall"], ["Notepad++", "Notepad++ Team", "Reinstall"],
+  ["Spotify", "Spotify AB", "Reinstall"], ["Steam", "Valve Corporation", "Reinstall"], ["Visual Studio Code", "Microsoft", "Reinstall"],
+  ["VLC media player", "VideoLAN", "Reinstall"], ["PortableTool", "Tool Co", "Copy"],
+  ["Realtek Audio Driver", "Realtek", "Manual", "Hardware software. The new PC needs the version made for its own hardware."],
+  ["Microsoft 365 - en-us", "Microsoft", "Manual", "Office is tied to your Microsoft account. Install it from office.com and sign in."],
+  ["Bloons TD 6", "Ninja Kiwi", "Manual", "A Steam game. Install it from your Steam library on the new PC; save files in your folders were copied."],
+].map(([name, publisher, method, reason], i) => ({ key: "k" + i, name, publisher, method, reason: reason || "" }));
 const Mock = {
   handle({ id, cmd, args }) {
     const reply = (result, delay = 150) => setTimeout(() => receive({ id, result }), delay);
@@ -808,7 +895,8 @@ const Mock = {
         return reply(null);
       case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, fromComputer: "TYLOR-DESKTOP" });
       case "startReceive": return reply({ code: "482913", addresses: ["192.168.1.42"] });
-      case "readStore": return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"] });
+      case "planApps": return reply(MOCK_APPS, 1600);
+      case "readStore": return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
       case "capture": case "send": case "apply": {
         const total = args.estimatedBytes || 69.6e9; let b = 0, f = 0;
         const t = setInterval(() => { b += total / 40; f += 1300; receive({ event: "progress", files: f, bytes: b, path: "C:\\Users\\tylor\\Documents\\Taxes\\2023\\return-final.pdf" }); if (b >= total) clearInterval(t); }, 120);
@@ -816,7 +904,8 @@ const Mock = {
         emit("warning", { message: "Could not copy C:\\Users\\tylor\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\LOCK: in use" }, 2000);
         return reply(cmd === "apply"
           ? { copied: 57210, skipped: 162, failed: 0, bytes: 69.6e9, warnings: ["No user 'guest' on this PC, so guest's files were skipped."], reportPath: "E:\\Migration\\apply-report.txt",
-              apps: ["Spotify|Spotify AB", "Steam|Valve Corporation", "VLC media player|VideoLAN", "Zoom Workplace|Zoom Communications", "Adobe Acrobat Reader|Adobe", "Discord|Discord Inc."].map(s => ({ name: s.split("|")[0], publisher: s.split("|")[1] })) }
+              programs: [{ name: "Google Chrome", outcome: "AlreadyInstalled" }, { name: "Spotify", outcome: "Failed", message: "This program's installer refuses to run as administrator. Install it normally from its website." }, { name: "Discord", outcome: "Installed" }, { name: "VLC media player", outcome: "Installed" }, { name: "Notepad++", outcome: "Installed" }, { name: "Visual Studio Code", outcome: "Installed" }, { name: "PortableTool", outcome: "Copied" }],
+              apps: [{ name: "Spotify", reason: "This program's installer refuses to run as administrator. Install it normally from its website." }, { name: "Realtek Audio Driver", reason: "Hardware software. The new PC needs the version made for its own hardware." }, { name: "Microsoft 365 - en-us", reason: "Office is tied to your Microsoft account. Install it from office.com and sign in." }, { name: "Bloons TD 6", reason: "A Steam game. Install it from your Steam library on the new PC." }] }
           : { files: 57372, bytes: 69.6e9, seconds: 1460, warnings: ["Could not copy ...\\LOCK: in use"], logPath: "E:\\Migration\\pcmigrate.log" }, 5200);
       }
       default: return reply(null);
