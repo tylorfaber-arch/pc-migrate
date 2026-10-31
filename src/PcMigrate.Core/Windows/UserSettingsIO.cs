@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 using PcMigrate.Core.Models;
+using PcMigrate.Core.Offline;
 
 namespace PcMigrate.Core.Windows;
 
@@ -14,9 +15,9 @@ internal static partial class UserSettingsIO
 
     public sealed record Captured(UserSettings Settings, string? WallpaperSourcePath);
 
-    public static Captured? Read(UserProfileInfo user, IMigrationLog log)
+    public static Captured? Read(UserProfileInfo user, IMigrationLog log, OfflinePaths? offline = null)
     {
-        using var hive = UserHive.Open(user, writable: false, log);
+        using var hive = UserHive.Open(user, writable: false, log, offline);
         if (hive is null) return null;
 
         var settings = new UserSettings { UserName = user.UserName };
@@ -26,7 +27,7 @@ internal static partial class UserSettingsIO
         {
             if (desktop?.GetValue("Wallpaper") is string wp && wp.Length > 0)
             {
-                wp = Environment.ExpandEnvironmentVariables(wp);
+                wp = offline?.ToReadable(wp) ?? Environment.ExpandEnvironmentVariables(wp);
                 // A signed-in user's wallpaper path may point into their own profile, which we read live.
                 if (File.Exists(wp)) wallpaper = wp;
             }

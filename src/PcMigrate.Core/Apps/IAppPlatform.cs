@@ -5,8 +5,14 @@ namespace PcMigrate.Core.Apps;
 /// <summary>The Windows pieces program moving needs. Faked in tests.</summary>
 public interface IAppPlatform
 {
-    /// <summary>Installed programs as winget sees them, or null when winget is not on this PC.</summary>
-    IReadOnlyList<WingetRow>? ListWinget();
+    /// <summary>
+    /// winget's catalogue entries for these programs, or null when winget is not on this PC.
+    /// On the running PC winget matches them itself; for a pulled drive each one is looked up.
+    /// </summary>
+    IReadOnlyList<WingetRow>? ListWinget(IReadOnlyList<InstalledApp> apps);
+
+    /// <summary>Set when the programs are on a drive pulled from a dead PC.</summary>
+    Offline.OfflinePaths? Offline => null;
 
     /// <summary>True if a Windows service runs a program from inside this folder.</summary>
     bool HasServiceUnder(string folder);

@@ -12,7 +12,7 @@ public sealed class WindowsAppPlatform(IMigrationLog log) : IAppPlatform
     // winget exit codes that mean "nothing to do": already installed, or no newer version.
     private static readonly HashSet<int> AlreadyInstalledCodes = [unchecked((int)0x8A150061), unchecked((int)0x8A15002B)];
 
-    public IReadOnlyList<WingetRow>? ListWinget()
+    public IReadOnlyList<WingetRow>? ListWinget(IReadOnlyList<InstalledApp> apps)
     {
         try
         {
@@ -65,7 +65,7 @@ public sealed class WindowsAppPlatform(IMigrationLog log) : IAppPlatform
         return software32 is null ? keys : keys.Concat(TwoLevels(software32)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static List<string> TwoLevels(RegistryKey software)
+    internal static List<string> TwoLevels(RegistryKey software)
     {
         var result = new List<string>();
         foreach (var top in software.GetSubKeyNames())

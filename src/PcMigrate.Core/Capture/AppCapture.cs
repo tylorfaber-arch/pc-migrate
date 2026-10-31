@@ -95,8 +95,9 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
         var n = 0;
         foreach (var folder in platform.SharedShortcutFolders())
         {
-            if (!Directory.Exists(folder)) continue;
-            foreach (var lnk in Directory.EnumerateFiles(folder, "*.lnk", SearchOption.AllDirectories))
+            var readable = mapPath(folder);
+            if (!Directory.Exists(readable)) continue;
+            foreach (var lnk in Directory.EnumerateFiles(readable, "*.lnk", SearchOption.AllDirectories))
             {
                 byte[] bytes;
                 try { bytes = await File.ReadAllBytesAsync(lnk); }
@@ -104,7 +105,7 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
                 if (!Shortcuts.PointsInto(bytes, location)) continue;
                 var storePath = StorePath.Combine(StorePath.SettingsRoot, "apps", app.Key, "shortcuts", $"{++n}.lnk");
                 if (await addFile(lnk, storePath, File.GetLastWriteTimeUtc(lnk)))
-                    app.Shortcuts.Add(new ShortcutFile { StorePath = storePath, TargetPath = lnk });
+                    app.Shortcuts.Add(new ShortcutFile { StorePath = storePath, TargetPath = Path.Combine(folder, Path.GetRelativePath(readable, lnk)) });
             }
         }
     }

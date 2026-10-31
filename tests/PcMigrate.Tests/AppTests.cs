@@ -106,7 +106,7 @@ internal sealed class FakeApps : IAppPlatform
     public List<string> ImportedMachine { get; } = [];
     public bool FailInstalls { get; set; }
 
-    public IReadOnlyList<WingetRow>? ListWinget() => Winget;
+    public IReadOnlyList<WingetRow>? ListWinget(IReadOnlyList<InstalledApp> apps) => Winget;
     public bool HasServiceUnder(string folder) => ServiceFolders.Contains(folder);
     public IReadOnlyList<string> UserSoftwareKeys(UserProfileInfo user) => UserKeys.TryGetValue(user.UserName, out var k) ? k : [];
     public IReadOnlyList<string> MachineSoftwareKeys() => ["FooCorp", @"FooCorp\FooTool"];

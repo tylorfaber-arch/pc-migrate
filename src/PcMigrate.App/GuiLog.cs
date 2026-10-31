@@ -11,6 +11,8 @@ internal sealed class GuiLog(Action<string, object> post, string? logFile = null
     private readonly object _lock = new();
 
     public List<string> Warnings { get; } = [];
+    /// <summary>Also told about progress, a few times a second (the taskbar button uses it).</summary>
+    public Action<long, long>? OnProgress { get; init; }
 
     public void Info(string message)
     {
@@ -34,6 +36,7 @@ internal sealed class GuiLog(Action<string, object> post, string? logFile = null
             _sinceProgress.Restart();
         }
         post("progress", new { files = filesDone, bytes = bytesDone, path = currentPath });
+        OnProgress?.Invoke(filesDone, bytesDone);
     }
 
     private void Write(string level, string message)

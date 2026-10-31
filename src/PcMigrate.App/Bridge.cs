@@ -18,9 +18,16 @@ namespace PcMigrate.App;
 /// </summary>
 internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
 {
+    // This PC, which is where things get applied.
     private readonly WindowsSystemProbe _probe = new(NullLog.Instance);
     private readonly WindowsAppPlatform _apps = new(NullLog.Instance);
+    private readonly Notifier _notify = new(form);
     private Inventory? _inventory;
+    // Set while copying from a drive pulled out of a dead PC instead of from this PC.
+    private OfflineWindows? _pulled;
+    private OfflineSystemProbe? _pulledProbe;
+    private OfflineAppPlatform? _pulledApps;
+    private Inventory? _pulledInventory;
     private Task<List<AppEntry>>? _planning;
     private CancellationTokenSource? _work;
     private CancellationTokenSource? _discovery;
@@ -56,6 +63,11 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "init" => await Init(),
         "measureUsers" => MeasureUsers(),
         "planApps" => await PlanApps(),
+        "listDrives" => await Task.Run(ListDrives),
+        "unlockDrive" => await Task.Run(() => UnlockDrive(Str(args, "root"), Str(args, "key"))),
+        "useDrive" => await UseDrive(Str(args, "root")),
+        "useThisPc" => UseThisPc(),
+        "captureHere" => await Capture(args, LocalStore("from-drive"), toNetwork: false),
         "startDiscovery" => StartDiscovery(),
         "stopDiscovery" => StopDiscovery(),
         "pickFolder" => PickFolder(Str(args, "purpose")),
@@ -82,19 +94,71 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         };
     }
 
+    private ISystemProbe SourceProbe => (ISystemProbe?)_pulledProbe ?? _probe;
+    private IAppPlatform SourceApps => (IAppPlatform?)_pulledApps ?? _apps;
+    private Inventory? SourceInventory => _pulled is null ? _inventory : _pulledInventory;
+
+    private static List<object> ListDrives() =>
+        OfflineWindows.Find().Select(d => (object)new
+        {
+            root = d.Root, label = d.Label, locked = d.Locked, computerName = d.ComputerName,
+            usedBytes = d.TotalBytes - d.FreeBytes, totalBytes = d.TotalBytes, users = d.Users,
+        }).ToList();
+
+    private static object UnlockDrive(string root, string key)
+    {
+        if (BitLocker.Unlock(root, key) is { } problem) throw new InvalidOperationException(problem);
+        return new { ok = true };
+    }
+
+    /// <summary>Switches the source to a pulled drive. Everything on the old-PC side then reads from it.</summary>
+    private async Task<object> UseDrive(string root)
+    {
+        UseThisPc();
+        var drive = await Task.Run(() => OfflineWindows.Open(root));
+        _pulled = drive;
+        _pulledProbe = new OfflineSystemProbe(drive, NullLog.Instance);
+        _pulledApps = new OfflineAppPlatform(drive, NullLog.Instance);
+        _pulledInventory = await Task.Run(_pulledProbe.GetInventory);
+        return new
+        {
+            root,
+            computerName = drive.ComputerName,
+            os = drive.OsDescription,
+            appCount = _pulledInventory.Apps.Count,
+            users = _pulledInventory.Users.Select(u => new { name = u.UserName, path = drive.Paths.ToReadable(u.ProfilePath) }),
+        };
+    }
+
+    private object? UseThisPc()
+    {
+        _measuring?.Cancel();
+        _planning = null;
+        _pulledInventory = null;
+        _pulledProbe = null;
+        _pulledApps = null;
+        _pulled?.Dispose();
+        _pulled = null;
+        return null;
+    }
+
+    private static string LocalStore(string kind) =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"{kind}-{DateTime.Now:yyyyMMdd-HHmmss}");
+
     private object? MeasureUsers()
     {
         _measuring?.Cancel();
         _measuring = new CancellationTokenSource();
         var ct = _measuring.Token;
-        var users = _inventory?.Users ?? [];
+        var users = SourceInventory?.Users ?? [];
+        var offline = SourceProbe.Offline;
         // One user at a time in the background; each result shows up on the page as it comes in.
         _ = Task.Run(() =>
         {
             foreach (var user in users)
             {
                 if (ct.IsCancellationRequested) return;
-                var (files, bytes) = CaptureEngine.Estimate(user, new CaptureRules(), ct);
+                var (files, bytes) = CaptureEngine.Estimate(user, new CaptureRules(), ct, offline);
                 Post("userMeasured", new { name = user.UserName, files, bytes });
             }
         }, ct);
@@ -104,8 +168,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
     /// <summary>Works out once, in the background, how each program would move (winget takes a few seconds).</summary>
     private async Task<object> PlanApps()
     {
-        var inventory = _inventory ?? await Task.Run(_probe.GetInventory);
-        _planning ??= Task.Run(() => AppPlanner.Plan(inventory, _apps, inventory.Users, new CaptureRules()));
+        var inventory = SourceInventory ?? await Task.Run(SourceProbe.GetInventory);
+        var platform = SourceApps;
+        _planning ??= Task.Run(() => AppPlanner.Plan(inventory, platform, inventory.Users, new CaptureRules()));
         var plans = await _planning;
         return plans.Select(p => new { key = p.Key, name = p.Name, version = p.Version, publisher = p.Publisher, method = p.Method.ToString(), reason = p.Reason });
     }
@@ -168,14 +233,15 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             Users = args.GetProperty("users").EnumerateArray().Select(u => u.GetString()!).ToList(),
             IncludeWifi = args.GetProperty("wifi").GetBoolean(),
             IncludeUserSettings = args.GetProperty("settings").GetBoolean(),
-            UseShadowCopy = args.GetProperty("shadow").GetBoolean(),
+            UseShadowCopy = args.GetProperty("shadow").GetBoolean() && _pulled is null,
         };
         var estimate = args.TryGetProperty("estimatedBytes", out var e) && e.ValueKind == JsonValueKind.Number ? (long)e.GetDouble() : 0;
         var logPath = toNetwork ? null : Path.Combine(destination, $"pc-migrate-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 
         var ct = BeginWork();
-        using var log = new GuiLog(Post, logPath);
+        using var log = new GuiLog(Post, logPath) { OnProgress = (_, bytes) => _notify.Progress(bytes, estimate) };
         var timer = Stopwatch.StartNew();
+        var (probe, apps) = (SourceProbe, SourceApps);
         try
         {
             Manifest manifest;
@@ -183,21 +249,30 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             {
                 log.Info($"Connecting to {destination}...");
                 await using var sink = await NetworkSender.ConnectAsync(destination, Int(args, "port", NetworkReceiver.DefaultPort), Str(args, "code"), ct, estimate);
-                manifest = await Task.Run(() => new CaptureEngine(_probe, log, _apps).RunAsync(sink, options, ct), ct);
+                manifest = await Task.Run(() => new CaptureEngine(probe, log, apps).RunAsync(sink, options, ct), ct);
             }
             else
             {
                 await using var sink = new FolderSink(destination);
-                manifest = await Task.Run(() => new CaptureEngine(_probe, log, _apps).RunAsync(sink, options, ct), ct);
+                manifest = await Task.Run(() => new CaptureEngine(probe, log, apps).RunAsync(sink, options, ct), ct);
             }
+            var bytes = manifest.Files.Sum(f => f.Length);
+            _notify.Finished(toNetwork ? "Sent to the new PC" : "Backup finished",
+                Summary(manifest.Files.Count, bytes, timer.Elapsed, log.Warnings.Count), logPath);
             return new
             {
                 files = manifest.Files.Count,
-                bytes = manifest.Files.Sum(f => f.Length),
+                bytes,
                 seconds = timer.Elapsed.TotalSeconds,
                 warnings = log.Warnings,
                 logPath,
+                folder = toNetwork ? null : destination,
             };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed(toNetwork ? "Sending stopped" : "Backup stopped", Friendly(ex), logPath);
+            throw;
         }
         finally
         {
@@ -234,10 +309,12 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             {
                 await receiver.ReceiveAsync(ct);
                 stopDiscovery.Cancel();
+                _notify.Finished("Everything arrived", "The old PC has finished sending. Check what to put where, then start.");
                 Post("received", new { folder });
             }
             catch (Exception ex)
             {
+                if (ex is not OperationCanceledException) _notify.Failed("Receiving stopped", Friendly(ex));
                 Post("failed", new { message = ex is OperationCanceledException ? "Cancelled." : Friendly(ex) });
             }
             finally
@@ -298,13 +375,19 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             UserMap = map,
             SkipUsers = skip,
             Conflicts = Str(args, "conflicts") switch { "overwrite" => ConflictMode.Overwrite, "skip" => ConflictMode.Skip, _ => ConflictMode.NewerWins },
+            MoveFromStore = args.TryGetProperty("move", out var mv) && mv.ValueKind == JsonValueKind.True,
         };
 
+        var folder = Str(args, "folder");
+        long total = 0;
+        try { total = FolderSink.ReadManifest(folder).Files.Sum(f => f.Length); } catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException) { }
         var ct = BeginWork();
-        using var log = new GuiLog(Post);
+        using var log = new GuiLog(Post) { OnProgress = (_, bytes) => _notify.Progress(bytes, total) };
+        var timer = Stopwatch.StartNew();
         try
         {
-            var result = await Task.Run(() => new ApplyEngine(_probe, log, _apps).RunAsync(Str(args, "folder"), options, ct), ct);
+            var result = await Task.Run(() => new ApplyEngine(_probe, log, _apps).RunAsync(folder, options, ct), ct);
+            _notify.Finished("All moved over", Summary(result.FilesCopied, result.BytesCopied, timer.Elapsed, result.Warnings.Count), result.ReportPath);
             return new
             {
                 copied = result.FilesCopied,
@@ -322,6 +405,11 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
                     reason = result.Apps.FirstOrDefault(r => r.Name == x.Name)?.Message,
                 }),
             };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Moving stopped", Friendly(ex));
+            throw;
         }
         finally
         {
@@ -390,10 +478,19 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         _ => ex.Message,
     };
 
+    private static string Summary(long files, long bytes, TimeSpan time, int warnings)
+    {
+        var took = time.TotalMinutes < 1 ? $"{time.Seconds} s" : time.TotalHours < 1 ? $"{(int)time.TotalMinutes} min" : $"{(int)time.TotalHours} h {time.Minutes} min";
+        var text = $"{files:N0} files, {CaptureEngine.FormatBytes(bytes)} in {took}.";
+        return warnings == 0 ? text : $"{text} {warnings:N0} item(s) couldn't be copied; click to see which.";
+    }
+
     public void Dispose()
     {
         _work?.Cancel();
         _discovery?.Cancel();
         _measuring?.Cancel();
+        _pulled?.Dispose();
+        _notify.Dispose();
     }
 }

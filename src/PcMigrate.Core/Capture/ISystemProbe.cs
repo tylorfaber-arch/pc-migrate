@@ -9,4 +9,7 @@ public interface ISystemProbe
 
     /// <summary>SID of the account running pc-migrate, used to apply settings live.</summary>
     string? CurrentUserSid { get; }
+
+    /// <summary>Set when reading a drive pulled from a dead PC rather than the running Windows.</summary>
+    Offline.OfflinePaths? Offline => null;
 }
