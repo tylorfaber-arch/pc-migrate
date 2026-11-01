@@ -1,3 +1,4 @@
+using PcMigrate.Core.Apps;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Windows;
@@ -12,10 +13,12 @@ public sealed class CaptureOptions
     public bool IncludeWifi { get; init; } = true;
     public bool IncludeUserSettings { get; init; } = true;
     public CaptureRules Rules { get; init; } = new();
+    /// <summary>Programs to bring along, as planned by <see cref="AppPlanner"/>. Manual ones are only recorded.</summary>
+    public IReadOnlyList<AppEntry> Apps { get; init; } = [];
 }
 
 /// <summary>Collects everything from the old PC and sends it to a sink (folder or network).</summary>
-public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log)
+public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPlatform? apps = null)
 {
     private const int MaxWarningsInManifest = 2000;
 
@@ -39,51 +42,67 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log)
             Func<string, string> mapPath = p => p;
             if (options.UseShadowCopy && OperatingSystem.IsWindows())
             {
-                mapPath = CreateSnapshots(users, snapshots, Warn);
+                var volumes = users.Select(u => u.ProfilePath)
+                    .Concat(options.Apps.Where(a => a.Method == AppMethod.Copy && a.InstallLocation is not null).Select(a => a.InstallLocation!))
+                    .Select(p => Path.GetPathRoot(p)!)
+                    .Where(v => v.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+                mapPath = CreateSnapshots(volumes, snapshots, Warn);
                 manifest.UsedShadowCopy = snapshots.Count > 0;
             }
 
             long files = 0, bytes = 0;
+            // Problems reading one file are warnings; a SinkWriteException (drive full,
+            // network dropped) is not caught here and stops the capture.
+            async Task<bool> AddFile(string fullPath, string storePath, DateTime lastWriteUtc)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!StorePath.IsSafe(storePath))
+                {
+                    Warn($"Skipped file with an unusual name: {fullPath}");
+                    return false;
+                }
+                try
+                {
+                    FileWriteResult written;
+                    await using (var input = HashingCopy.OpenForRead(fullPath))
+                        written = await sink.AddFileAsync(storePath, input, lastWriteUtc, ct);
+                    manifest.Files.Add(new ManifestFile { StorePath = storePath, Length = written.Length, LastWriteUtc = lastWriteUtc, Sha256 = written.Sha256 });
+                    files++;
+                    bytes += written.Length;
+                    log.FileProgress(files, bytes, storePath);
+                    return true;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Warn($"Could not copy {fullPath}: {ex.Message}");
+                    return false;
+                }
+            }
+
+            // Program settings folders ride along with each person's files.
+            var appFolders = options.Apps.Where(a => a.Method != AppMethod.Manual).SelectMany(a => a.SettingsFolders);
+            var folders = options.Rules.ProfileFolders.Concat(appFolders).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
             foreach (var user in users)
             {
                 log.Info($"Copying files for {user.UserName}...");
-                foreach (var folder in options.Rules.ProfileFolders)
+                foreach (var folder in folders)
                 {
                     var source = mapPath(Path.Combine(user.ProfilePath, folder.Replace('/', Path.DirectorySeparatorChar)));
-                    foreach (var file in FileCollector.Enumerate(source, folder, options.Rules, Warn))
+                    // A few programs keep their settings in a single file (e.g. .gitconfig).
+                    if (File.Exists(source))
                     {
-                        ct.ThrowIfCancellationRequested();
-                        var storePath = StorePath.Combine(StorePath.UsersRoot, user.UserName, file.RelativePath);
-                        if (!StorePath.IsSafe(storePath))
-                        {
-                            Warn($"Skipped file with an unusual name: {file.FullPath}");
-                            continue;
-                        }
-                        // Problems reading one file are warnings; a SinkWriteException (drive full,
-                        // network dropped) is not caught here and stops the capture.
-                        try
-                        {
-                            FileWriteResult written;
-                            await using (var input = HashingCopy.OpenForRead(file.FullPath))
-                                written = await sink.AddFileAsync(storePath, input, file.LastWriteUtc, ct);
-                            manifest.Files.Add(new ManifestFile
-                            {
-                                StorePath = storePath,
-                                Length = written.Length,
-                                LastWriteUtc = file.LastWriteUtc,
-                                Sha256 = written.Sha256,
-                            });
-                            files++;
-                            bytes += written.Length;
-                            log.FileProgress(files, bytes, storePath);
-                        }
-                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                        {
-                            Warn($"Could not copy {file.FullPath}: {ex.Message}");
-                        }
+                        await AddFile(source, StorePath.Combine(StorePath.UsersRoot, user.UserName, folder), File.GetLastWriteTimeUtc(source));
+                        continue;
                     }
+                    foreach (var file in FileCollector.Enumerate(source, folder, options.Rules, Warn))
+                        await AddFile(file.FullPath, StorePath.Combine(StorePath.UsersRoot, user.UserName, file.RelativePath), file.LastWriteUtc);
                 }
             }
+
+            if (options.Apps.Count > 0)
+                await new AppCapture(apps, log, Warn).RunAsync(options.Apps, users, manifest, mapPath, AddFile, sink, ct);
 
             if (options.IncludeUserSettings && OperatingSystem.IsWindows())
                 await CaptureUserSettingsAsync(users, sink, manifest, Warn, ct);
@@ -116,9 +135,9 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log)
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private Func<string, string> CreateSnapshots(List<UserProfileInfo> users, Dictionary<string, IDisposable> snapshots, Action<string> warn)
+    private Func<string, string> CreateSnapshots(IEnumerable<string> volumes, Dictionary<string, IDisposable> snapshots, Action<string> warn)
     {
-        foreach (var volume in users.Select(u => Path.GetPathRoot(u.ProfilePath)!).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var volume in volumes)
         {
             try
             {

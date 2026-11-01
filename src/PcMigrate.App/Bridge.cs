@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using PcMigrate.Core;
 using PcMigrate.Core.Apply;
+using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
@@ -18,7 +19,9 @@ namespace PcMigrate.App;
 internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
 {
     private readonly WindowsSystemProbe _probe = new(NullLog.Instance);
+    private readonly WindowsAppPlatform _apps = new(NullLog.Instance);
     private Inventory? _inventory;
+    private Task<List<AppEntry>>? _planning;
     private CancellationTokenSource? _work;
     private CancellationTokenSource? _discovery;
     private CancellationTokenSource? _measuring;
@@ -52,6 +55,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
     {
         "init" => await Init(),
         "measureUsers" => MeasureUsers(),
+        "planApps" => await PlanApps(),
         "startDiscovery" => StartDiscovery(),
         "stopDiscovery" => StopDiscovery(),
         "pickFolder" => PickFolder(Str(args, "purpose")),
@@ -95,6 +99,15 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             }
         }, ct);
         return null;
+    }
+
+    /// <summary>Works out once, in the background, how each program would move (winget takes a few seconds).</summary>
+    private async Task<object> PlanApps()
+    {
+        var inventory = _inventory ?? await Task.Run(_probe.GetInventory);
+        _planning ??= Task.Run(() => AppPlanner.Plan(inventory, _apps, inventory.Users, new CaptureRules()));
+        var plans = await _planning;
+        return plans.Select(p => new { key = p.Key, name = p.Name, version = p.Version, publisher = p.Publisher, method = p.Method.ToString(), reason = p.Reason });
     }
 
     private object? StartDiscovery()
@@ -144,8 +157,14 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
     private async Task<object> Capture(JsonElement args, string destination, bool toNetwork)
     {
         StopDiscovery();
+        var appKeys = args.TryGetProperty("apps", out var a) && a.ValueKind == JsonValueKind.Array
+            ? a.EnumerateArray().Select(k => k.GetString()!).ToHashSet()
+            : [];
+        var plans = _planning is { IsCompletedSuccessfully: true } ? _planning.Result : [];
         var options = new CaptureOptions
         {
+            // Programs the person can't move are still recorded, so the new PC can list them.
+            Apps = plans.Where(p => appKeys.Contains(p.Key) || p.Method == AppMethod.Manual).ToList(),
             Users = args.GetProperty("users").EnumerateArray().Select(u => u.GetString()!).ToList(),
             IncludeWifi = args.GetProperty("wifi").GetBoolean(),
             IncludeUserSettings = args.GetProperty("settings").GetBoolean(),
@@ -164,12 +183,12 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             {
                 log.Info($"Connecting to {destination}...");
                 await using var sink = await NetworkSender.ConnectAsync(destination, Int(args, "port", NetworkReceiver.DefaultPort), Str(args, "code"), ct, estimate);
-                manifest = await Task.Run(() => new CaptureEngine(_probe, log).RunAsync(sink, options, ct), ct);
+                manifest = await Task.Run(() => new CaptureEngine(_probe, log, _apps).RunAsync(sink, options, ct), ct);
             }
             else
             {
                 await using var sink = new FolderSink(destination);
-                manifest = await Task.Run(() => new CaptureEngine(_probe, log).RunAsync(sink, options, ct), ct);
+                manifest = await Task.Run(() => new CaptureEngine(_probe, log, _apps).RunAsync(sink, options, ct), ct);
             }
             return new
             {
@@ -243,14 +262,21 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             .GroupBy(x => x.user!, StringComparer.OrdinalIgnoreCase)
             .Select(g => new { name = g.Key, files = g.Count(), bytes = g.Sum(x => x.Length) })
             .ToList();
+        var here = (_inventory ?? _probe.GetInventory());
+        var installed = here.Apps.Select(x => AppNames.Normalize(x.Name)).ToHashSet();
         return new
         {
+            apps = manifest.Apps.Select(p => new
+            {
+                key = p.Key, name = p.Name, publisher = p.Publisher, method = p.Method.ToString(), reason = p.Reason,
+                alreadyInstalled = installed.Contains(AppNames.Normalize(p.Name)),
+            }),
             fromComputer = manifest.Inventory.Machine.ComputerName,
             captured = manifest.Inventory.Machine.CapturedUtc,
             files = manifest.Files.Count,
             bytes = manifest.Files.Sum(f => f.Length),
             users,
-            targetUsers = (_inventory ?? _probe.GetInventory()).Users.Select(u => u.UserName),
+            targetUsers = here.Users.Select(u => u.UserName),
         };
     }
 
@@ -266,6 +292,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         }
         var options = new ApplyOptions
         {
+            AppKeys = args.TryGetProperty("apps", out var a) && a.ValueKind == JsonValueKind.Array
+                ? a.EnumerateArray().Select(k => k.GetString()!).ToHashSet()
+                : null,
             UserMap = map,
             SkipUsers = skip,
             Conflicts = Str(args, "conflicts") switch { "overwrite" => ConflictMode.Overwrite, "skip" => ConflictMode.Skip, _ => ConflictMode.NewerWins },
@@ -275,7 +304,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         using var log = new GuiLog(Post);
         try
         {
-            var result = await Task.Run(() => new ApplyEngine(_probe, log).RunAsync(Str(args, "folder"), options, ct), ct);
+            var result = await Task.Run(() => new ApplyEngine(_probe, log, _apps).RunAsync(Str(args, "folder"), options, ct), ct);
             return new
             {
                 copied = result.FilesCopied,
@@ -284,7 +313,14 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
                 bytes = result.BytesCopied,
                 warnings = result.Warnings,
                 reportPath = result.ReportPath,
-                apps = result.AppsToReinstall.Select(a => new { name = a.Name, publisher = a.Publisher, version = a.Version }),
+                programs = result.Apps
+                    .Where(x => x.Outcome is not (AppOutcome.Manual or AppOutcome.NotSelected))
+                    .Select(x => new { name = x.Name, outcome = x.Outcome.ToString(), message = x.Message }),
+                apps = result.AppsToReinstall.Select(x => new
+                {
+                    name = x.Name, publisher = x.Publisher, version = x.Version,
+                    reason = result.Apps.FirstOrDefault(r => r.Name == x.Name)?.Message,
+                }),
             };
         }
         finally

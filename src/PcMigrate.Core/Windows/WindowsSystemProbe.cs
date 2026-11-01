@@ -57,17 +57,17 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
         var apps = new List<InstalledApp>();
 
         using (var hklm64 = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
-            ReadUninstall(hklm64, "HKLM", "Machine", Environment.Is64BitOperatingSystem, apps);
+            ReadUninstall(hklm64, $@"HKLM\{UninstallKey}", "Machine", Environment.Is64BitOperatingSystem, apps);
         if (Environment.Is64BitOperatingSystem)
         {
             using var hklm32 = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32);
-            ReadUninstall(hklm32, "HKLM (32-bit)", "Machine", false, apps);
+            ReadUninstall(hklm32, $@"HKLM\{UninstallKey.Replace(@"SOFTWARE\", @"SOFTWARE\WOW6432Node\")}", "Machine", false, apps);
         }
 
         foreach (var user in users)
         {
             using var hive = UserHive.Open(user, writable: false, log);
-            if (hive is not null) ReadUninstall(hive.Root, $@"HKU\{user.UserName}", user.UserName, true, apps);
+            if (hive is not null) ReadUninstall(hive.Root, $@"HKU\{user.Sid}\{UninstallKey}", user.UserName, true, apps);
         }
 
         // The same program can show up in more than one place; keep one row each.
@@ -78,7 +78,7 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
             .ToList();
     }
 
-    private static void ReadUninstall(RegistryKey root, string rootLabel, string scope, bool is64, List<InstalledApp> into)
+    private static void ReadUninstall(RegistryKey root, string keyPath, string scope, bool is64, List<InstalledApp> into)
     {
         using var uninstall = root.OpenSubKey(UninstallKey);
         if (uninstall is null) return;
@@ -105,7 +105,8 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
                 EstimatedSizeKb = key.GetValue("EstimatedSize") is int size ? size : null,
                 Scope = scope,
                 Is64Bit = is64,
-                RegistryKey = $@"{rootLabel}\{UninstallKey}\{name}",
+                RegistryKey = $@"{keyPath}\{name}",
+                IsMsi = key.GetValue("WindowsInstaller") is int msi && msi == 1,
             });
         }
     }

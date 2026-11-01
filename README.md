@@ -27,7 +27,7 @@
 
 ---
 
-> Status: files and settings move today, with a step-by-step app. Moving installed programs is next.
+> Status: moves files, settings and programs, with a step-by-step app. Code signing and selling are next.
 
 ## Using it
 
@@ -64,10 +64,27 @@ new PC:  pcmigrate-cli receive                            old PC:  pcmigrate-cli
 | Wallpaper | |
 | Mapped network drives | Reconnect at next sign-in |
 | Saved Wi-Fi networks, with passwords | |
-| List of installed programs | The apply report lists the programs still to install on the new PC |
+| **Programs** | See *How programs move* below |
 
 Caches and temporary files are skipped. OneDrive "online-only" files are skipped since OneDrive
 will download them again on the new PC.
+
+## How programs move
+
+Every program in *Apps & features* gets one of three badges:
+
+| Badge | What happens | Which programs |
+|---|---|---|
+| 🟢 **Reinstall + settings** | The new PC installs a fresh copy with **winget** (Windows' own app installer), then the program's settings folders (AppData) and registry settings from the old PC are copied in | Anything winget knows: Chrome, Spotify, Discord, Steam, VS Code, VLC, Zoom, Notepad++ and thousands more |
+| 🟡 **Copy as is** | The program folder, its registry entries, its Start menu and desktop shortcuts and its settings are copied | Programs winget doesn't have that were installed by simply unpacking files |
+| 🔴 **Do by hand** | Listed on the finish screen with the reason | Drivers, antivirus, Office/Microsoft 365, Steam games (reinstall from your library; saves come with your files), Windows Installer (.msi) programs winget doesn't have, and anything that runs a Windows service |
+
+Runtimes and parts of Windows (Visual C++ redistributables, .NET, Edge, WebView2) are left out of the list.
+A program that's already installed on the new PC just gets its settings.
+
+Known limits: a few installers (Spotify is one) refuse to run from an administrator program, so
+winget can't install them from pc-migrate. They're reported, with a note to install them normally.
+Licence keys and sign-ins don't move.
 
 ## How it works
 
@@ -82,6 +99,10 @@ will download them again on the new PC.
 - **The store.** A capture is a folder: the files under `files/users/<name>/...`, settings under
   `settings/`, and a `manifest.json` written last with a SHA-256 checksum for every file. A
   folder without `manifest.json` is an unfinished capture.
+- **Programs.** `winget list` matches installed programs to winget's catalogue. Settings are found by
+  name: folders in `AppData\Roaming`, `AppData\Local` and `AppData\LocalLow`, and keys under
+  `HKEY_CURRENT_USER\Software`, called after the program (or *Maker\Program*). Registry settings are
+  exported with `reg export` and, on the new PC, rewritten for the right account before `reg import`.
 - **Finding the new PC.** The old PC broadcasts a short question on UDP port 47801 and every PC
   waiting to receive answers with its name, so nobody has to look up an IP address.
 - **The app window.** The screens are a web page (`src/PcMigrate.App/ui/index.html`) shown with
@@ -122,6 +143,7 @@ Download links at the top serve.
 
 ```
 src/PcMigrate.Core      the engine: scanning, capture, apply, network transfer
+  Apps/                 rating programs, finding their settings, winget
   Capture/              what to copy and how to walk folders
   Apply/                restoring onto the new PC and the report
   Transfer/             the network protocol
@@ -135,7 +157,7 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 
 ## Roadmap
 
-1. Files and settings ← here
-2. Move installed programs (files, registry, services, shortcuts) with a "will it move?" rating, and a winget reinstall fallback
+1. Files and settings ← done
+2. Move installed programs ← done (winget reinstall + settings, or copy as is)
 3. Step-by-step app window ← done early; code signing still to do
 4. Licensing, installer and a place to sell it

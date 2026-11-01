@@ -14,18 +14,22 @@ internal sealed class UserHive : IDisposable
 {
     private readonly string? _mountName;
 
-    private UserHive(RegistryKey root, string? mountName)
+    private UserHive(RegistryKey root, string? mountName, string sid)
     {
         Root = root;
         _mountName = mountName;
+        RootPath = $@"HKU\{mountName ?? sid}";
     }
 
     public RegistryKey Root { get; }
 
+    /// <summary>Where this hive is in the registry right now, as reg.exe writes it (HKU\...).</summary>
+    public string RootPath { get; }
+
     public static UserHive? Open(UserProfileInfo user, bool writable, IMigrationLog log)
     {
         var loaded = Registry.Users.OpenSubKey(user.Sid, writable);
-        if (loaded is not null) return new UserHive(loaded, null);
+        if (loaded is not null) return new UserHive(loaded, null, user.Sid);
 
         var hivePath = Path.Combine(user.ProfilePath, "NTUSER.DAT");
         if (!File.Exists(hivePath))
@@ -48,7 +52,7 @@ internal sealed class UserHive : IDisposable
             Unload(mount);
             return null;
         }
-        return new UserHive(key, mount);
+        return new UserHive(key, mount, user.Sid);
     }
 
     public void Dispose()

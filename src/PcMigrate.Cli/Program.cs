@@ -2,6 +2,7 @@ using System.Security.Principal;
 using PcMigrate.Cli;
 using PcMigrate.Core;
 using PcMigrate.Core.Apply;
+using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
@@ -51,6 +52,7 @@ async Task<int> Run(string[] argv)
 
     using var log = new ConsoleLog(cli.Get("log"));
     var probe = new WindowsSystemProbe(log);
+    var appPlatform = new WindowsAppPlatform(log);
 
     try
     {
@@ -95,19 +97,44 @@ async Task<int> Run(string[] argv)
             Console.WriteLine($"  {user.UserName,-24} {files,10:N0} files  {CaptureEngine.FormatBytes(bytes),10}   {user.ProfilePath}");
         }
         Console.WriteLine();
-        Console.WriteLine($"Installed programs ({inventory.Apps.Count}):");
-        foreach (var app in inventory.Apps)
-            Console.WriteLine($"  {app.Name}{(app.Version is null ? "" : "  " + app.Version)}{(app.Scope == "Machine" ? "" : "  (for " + app.Scope + ")")}");
+        Console.WriteLine("Checking which programs can move...");
+        var plans = AppPlanner.Plan(inventory, appPlatform, inventory.Users, rules);
+        foreach (var group in plans.GroupBy(p => p.Method))
+        {
+            Console.WriteLine();
+            Console.WriteLine(group.Key switch
+            {
+                AppMethod.Reinstall => $"Reinstalled automatically, with settings ({group.Count()}):",
+                AppMethod.Copy => $"Copied as they are ({group.Count()}):",
+                _ => $"Need installing by hand ({group.Count()}):",
+            });
+            foreach (var app in group)
+                Console.WriteLine($"  {app.Name}{(app.Version is null ? "" : "  " + app.Version)}{(group.Key == AppMethod.Manual ? "  - " + app.Reason : "")}");
+        }
         return 0;
     }
 
-    CaptureOptions ReadCaptureOptions() => new()
+    CaptureOptions ReadCaptureOptions()
     {
-        Users = cli.GetAll("user").SelectMany(u => u.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToList(),
-        UseShadowCopy = !cli.Flag("no-shadow"),
-        IncludeWifi = !cli.Flag("no-wifi"),
-        IncludeUserSettings = !cli.Flag("no-settings"),
-    };
+        var users = cli.GetAll("user").SelectMany(u => u.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).ToList();
+        IReadOnlyList<AppEntry> apps = [];
+        if (!cli.Flag("no-apps"))
+        {
+            log.Info("Checking which programs can move...");
+            var inventory = probe.GetInventory();
+            var selected = users.Count == 0 ? inventory.Users : inventory.Users.Where(u => users.Contains(u.UserName, StringComparer.OrdinalIgnoreCase)).ToList();
+            apps = AppPlanner.Plan(inventory, appPlatform, selected, new CaptureRules());
+            log.Info($"{apps.Count(a => a.Method == AppMethod.Reinstall)} program(s) will be reinstalled, {apps.Count(a => a.Method == AppMethod.Copy)} copied, {apps.Count(a => a.Method == AppMethod.Manual)} need installing by hand.");
+        }
+        return new CaptureOptions
+        {
+            Users = users,
+            UseShadowCopy = !cli.Flag("no-shadow"),
+            IncludeWifi = !cli.Flag("no-wifi"),
+            IncludeUserSettings = !cli.Flag("no-settings"),
+            Apps = apps,
+        };
+    }
 
     async Task<int> Capture()
     {
@@ -119,7 +146,7 @@ async Task<int> Run(string[] argv)
             return Fail($"'{to}' already holds a finished capture. Pick an empty folder.");
 
         await using var sink = new FolderSink(to);
-        var manifest = await new CaptureEngine(probe, log).RunAsync(sink, options, cts.Token);
+        var manifest = await new CaptureEngine(probe, log, appPlatform).RunAsync(sink, options, cts.Token);
         return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate-cli apply --from \"{sink.Root}\"", manifest.Warnings.Count);
     }
 
@@ -133,7 +160,7 @@ async Task<int> Run(string[] argv)
 
         log.Info($"Connecting to {host}:{port}...");
         await using var sink = await NetworkSender.ConnectAsync(host, port, code, cts.Token);
-        var manifest = await new CaptureEngine(probe, log).RunAsync(sink, options, cts.Token);
+        var manifest = await new CaptureEngine(probe, log, appPlatform).RunAsync(sink, options, cts.Token);
         return Done("Everything was sent. Finish up on the new PC.", manifest.Warnings.Count);
     }
 
@@ -191,6 +218,7 @@ async Task<int> Run(string[] argv)
             DryRun = cli.Flag("dry-run"),
             IncludeWifi = !cli.Flag("no-wifi"),
             IncludeUserSettings = !cli.Flag("no-settings"),
+            IncludeApps = !cli.Flag("no-apps"),
         };
     }
 
@@ -202,12 +230,14 @@ async Task<int> Run(string[] argv)
             cli.RejectUnknown();
         }
         log.Info("Tip: close web browsers and Outlook first so their data can be replaced.");
-        var result = await new ApplyEngine(probe, log).RunAsync(from, options, cts.Token);
+        var result = await new ApplyEngine(probe, log, appPlatform).RunAsync(from, options, cts.Token);
 
         Console.WriteLine();
         Console.WriteLine($"Copied {result.FilesCopied:N0} files ({CaptureEngine.FormatBytes(result.BytesCopied)}), skipped {result.FilesSkipped:N0}, failed {result.FilesFailed:N0}.");
+        foreach (var app in result.Apps.Where(a => a.Outcome is not (AppOutcome.Manual or AppOutcome.NotSelected)))
+            Console.WriteLine($"  {app.Outcome,-16} {app.Name}{(app.Outcome == AppOutcome.Failed ? ": " + app.Message : "")}");
         if (result.AppsToReinstall.Count > 0)
-            Console.WriteLine($"{result.AppsToReinstall.Count} program(s) from the old PC are not installed here; they are listed in the report.");
+            Console.WriteLine($"{result.AppsToReinstall.Count} program(s) from the old PC still need installing by hand; they are listed in the report.");
         if (result.ReportPath is not null) Console.WriteLine($"Report: {result.ReportPath}");
         return Done(options.DryRun ? "Dry run only, nothing was changed." : "Done. Sign out and back in to see the moved settings.", result.Warnings.Count);
     }
@@ -252,13 +282,15 @@ async Task<int> Run(string[] argv)
               --no-shadow                  Do not take a snapshot; open files may be skipped.
               --no-wifi                    Do not move saved Wi-Fi networks.
               --no-settings                Do not move wallpaper and mapped drives.
+              --no-apps                    Do not bring programs along.
 
             Options for apply and receive:
               --map old=new                Put old user 'old' into new user 'new'. Repeatable.
               --conflicts newer|overwrite|skip
                                            When a file already exists (default: newer wins).
               --dry-run                    Show what would happen without changing anything.
-              --no-wifi, --no-settings     As above.
+              --no-wifi, --no-settings, --no-apps
+                                           As above.
               --to <folder>                (receive) Where to keep the received data.
               --no-apply                   (receive) Only receive; run apply later.
               --port <n>                   (send/receive) Network port, default {NetworkReceiver.DefaultPort}.
