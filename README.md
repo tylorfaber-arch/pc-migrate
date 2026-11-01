@@ -48,6 +48,13 @@ settings and programs come off it the same way, and the drive is only read. A Bi
 for its 48-digit recovery key (at aka.ms/myrecoverykey for the Microsoft account the old PC used).
 The drive can also be sent to another PC over the network or saved to a second external drive.
 
+**Clone a whole drive.** *Clone a whole drive* makes a start-up-ready copy of one drive onto another:
+this PC's drive onto a new SSD in a USB enclosure, or one USB drive onto another. Every partition
+comes across (boot, Windows, recovery); only used space is copied, and if the new drive is bigger the
+main partition grows to fill it. If the new drive is smaller but the files fit, it offers to shrink
+the old drive's main partition first (free space only). The drive being written is erased, so you
+type ERASE to start. The drive Windows is running from can be copied but never written to.
+
 **Updates.** When it starts, pc-migrate checks GitHub for a newer version and offers it in a bar at the
 top: **Update now** downloads it, checks it against GitHub's checksum, swaps it in and restarts.
 The command-line tool does the same with `pcmigrate-cli update`. Nothing is checked without internet.
@@ -67,6 +74,9 @@ new PC:  pcmigrate-cli receive                            old PC:  pcmigrate-cli
 From a dead PC's drive: `pcmigrate-cli drives` lists plugged-in drives with Windows on them, then
 `pcmigrate-cli capture --from-drive E: --to F:\migration` (or `send --from-drive E: ...`). Add
 `--recovery-key <key>` for a BitLocker drive.
+
+Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
+`pcmigrate-cli clone --from 0 --to 2`. Add `--shrink-source` to let it shrink the source first when needed.
 
 `pcmigrate-cli scan` lists users, sizes and programs. `--dry-run` on apply changes nothing. Use
 `--map olduser=newuser` when account names differ. `pcmigrate-cli help` lists everything.
@@ -128,6 +138,14 @@ Licence keys and sign-ins don't move.
   programs do, without changing their permissions. winget can't see the old PC's programs, so each
   one is looked up by name instead. *Onto this PC* reads the drive into a holding folder in
   `C:\ProgramData\pc-migrate` and then moves (not copies) the files into place.
+- **Drive clone.** The source's partition table is read straight from the disk and a new one is
+  planned for the target: partitions before the main Windows partition keep their places, ones after
+  it (usually recovery) move to the end, and the main one takes the space between. The target gets
+  fresh disk and partition IDs so both drives can be plugged in together. Lettered NTFS partitions are
+  copied from a shadow copy, and only the clusters NTFS marks as in use are read (plus its backup boot
+  sector); other partitions are copied whole. Afterwards the NTFS partition is extended, the clone's
+  saved drive letters are cleared so it takes C: on its own, and `bcdboot` rewrites its boot files.
+  The disks are checked again (size, model, serial) right before anything is erased.
 - **Finding the new PC.** The old PC broadcasts a short question on UDP port 47801 and every PC
   waiting to receive answers with its name, so nobody has to look up an IP address.
 - **The app window.** The screens are a web page (`src/PcMigrate.App/ui/index.html`) shown with
@@ -186,6 +204,6 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 2. Move installed programs ← done (winget reinstall + settings, or copy as is)
 3. Step-by-step app window ← done early; code signing still to do
 4. Rescue a dead PC's drive over USB ← done
-5. Full disk clone, drive to drive (including external to external)
+5. Full disk clone, drive to drive (including external to external) ← done, needs testing on real drives
 6. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
 7. Licensing, installer and a place to sell it

@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Two pushes close together would race to publish "latest"; keep only the newest build per branch.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest

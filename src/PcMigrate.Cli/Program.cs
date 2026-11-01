@@ -4,6 +4,7 @@ using PcMigrate.Core;
 using PcMigrate.Core.Apply;
 using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
+using PcMigrate.Core.Clone;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
@@ -99,6 +100,8 @@ async Task<int> Run(string[] argv)
         return cli.Command switch
         {
             "drives" => Drives(),
+            "disks" => ListDisks(),
+            "clone" => await CloneDisk(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
             "capture" => await Capture(),
@@ -120,6 +123,70 @@ async Task<int> Run(string[] argv)
     finally
     {
         pulled?.Dispose();
+    }
+
+    int ListDisks()
+    {
+        cli.RejectUnknown();
+        foreach (var disk in Disks.List())
+        {
+            Console.WriteLine($"{disk.Describe()}{(disk.IsSystem ? "   <- this PC is running from it" : "")}");
+            foreach (var p in disk.Partitions)
+                Console.WriteLine($"    {p.Number}. {CaptureEngine.FormatBytes(p.Length),9}  {(p.DriveLetter is { } l ? l + ":" : "  ")} {p.FileSystem ?? ""}{(p.UsedBytes is { } u ? $" ({CaptureEngine.FormatBytes(u)} used)" : "")}{(p.IsEfi ? " EFI" : p.IsMsr ? " reserved" : p.IsRecovery ? " recovery" : "")}");
+        }
+        Console.WriteLine();
+        Console.WriteLine("Clone with:  pcmigrate-cli clone --from <disk number> --to <disk number>");
+        return 0;
+    }
+
+    async Task<int> CloneDisk()
+    {
+        var from = cli.GetInt("from", -1);
+        var to = cli.GetInt("to", -1);
+        var shrink = cli.Flag("shrink-source");
+        var yes = cli.Flag("yes");
+        cli.RejectUnknown();
+        if (from < 0 || to < 0) return Fail("Say which disks: --from <number> --to <number>. 'pcmigrate-cli disks' lists them.");
+
+        ClonePlan Plan()
+        {
+            var disks = Disks.List();
+            var source = disks.FirstOrDefault(d => d.Number == from) ?? throw new ArgumentException($"There's no disk {from}.");
+            var target = disks.FirstOrDefault(d => d.Number == to) ?? throw new ArgumentException($"There's no disk {to}.");
+            return ClonePlanner.Plan(source, target);
+        }
+
+        var plan = Plan();
+        if (!plan.CanRun && plan.ShrinkSourceBy > 0 && shrink && plan.Main?.DriveLetter is { } letter)
+        {
+            Console.WriteLine(plan.Problem);
+            if (!yes)
+            {
+                Console.Write($"Shrink {letter}: now? Type yes to go ahead: ");
+                if (!string.Equals(Console.ReadLine()?.Trim(), "yes", StringComparison.OrdinalIgnoreCase)) return Fail("Not shrunk; nothing was changed.");
+            }
+            log.Info($"Shrinking {letter}: by {CaptureEngine.FormatBytes(plan.ShrinkSourceBy)} (Windows' own shrink)...");
+            DiskCloner.ShrinkVolume(letter, plan.ShrinkSourceBy);
+            plan = Plan();
+        }
+        if (!plan.CanRun)
+            return Fail(plan.Problem + (plan.ShrinkSourceBy > 0 && plan.Main?.DriveLetter is not null ? " Add --shrink-source to do that now." : ""));
+
+        Console.WriteLine($"From: {plan.Source.Describe()}");
+        Console.WriteLine($"To:   {plan.Target.Describe()}");
+        Console.WriteLine($"About {CaptureEngine.FormatBytes(plan.BytesToCopy)} to copy.");
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"Everything on disk {to} ({plan.Target.Model}) will be erased.");
+        Console.ResetColor();
+        if (!yes)
+        {
+            Console.Write($"Type ERASE {to} to go ahead: ");
+            if (!string.Equals(Console.ReadLine()?.Trim(), $"ERASE {to}", StringComparison.OrdinalIgnoreCase)) return Fail("Not confirmed; nothing was changed.");
+        }
+
+        var result = await new DiskCloner(log).RunAsync(plan, cts.Token);
+        foreach (var note in result.Notes) log.Warn(note);
+        return Done($"Cloned {CaptureEngine.FormatBytes(result.BytesCopied)} in {result.Elapsed:h\\:mm\\:ss}. Put the new drive in the PC and start it up.", result.Notes.Count);
     }
 
     async Task<int> SelfUpdate()
@@ -367,6 +434,11 @@ async Task<int> Run(string[] argv)
             Other commands:
               pcmigrate-cli scan [--json]  List users, how much would be copied, and installed programs.
               pcmigrate-cli version
+              pcmigrate-cli disks          List the physical disks and their partitions.
+              pcmigrate-cli clone --from <n> --to <n> [--shrink-source] [--yes]
+                                           Copy a whole disk so the copy starts up on its own.
+                                           Erases the target. --shrink-source shrinks the source's
+                                           main partition first when the target is smaller.
               pcmigrate-cli update         Download and install the newest version.
 
             Options for capture and send:
