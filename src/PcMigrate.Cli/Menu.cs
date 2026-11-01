@@ -16,12 +16,13 @@ internal static class Menu
         Console.WriteLine("  4. NEW PC: receive over the network  (start this first)");
         Console.WriteLine("  5. OLD PC: send over the network");
         Console.WriteLine("  6. Rescue a drive pulled from a dead PC (plugged in by USB)");
-        Console.WriteLine("  7. Show all commands");
+        Console.WriteLine("  7. Clone a whole drive onto another (erases the target)");
+        Console.WriteLine("  8. Show all commands");
         Console.WriteLine();
 
         while (true)
         {
-            switch (Prompt("Choose 1-7 (or press Enter to quit)"))
+            switch (Prompt("Choose 1-8 (or press Enter to quit)"))
             {
                 case "":
                     return null;
@@ -64,11 +65,20 @@ internal static class Menu
                     return [.. result, .. Users(), .. Log(to)];
                 }
                 case "7":
+                {
+                    Console.WriteLine();
+                    foreach (var disk in Disks.List())
+                        Console.WriteLine($"  {disk.Describe()}{(disk.IsSystem ? "   <- this PC runs from it" : "")}");
+                    var from = PromptRequired("Number of the disk to copy FROM");
+                    var to = PromptRequired("Number of the disk to copy TO (it will be erased)");
+                    return ["clone", "--from", from, "--to", to, "--shrink-source"];
+                }
+                case "8":
                     return ["help"];
                 case "u" or "U":
                     return ["update"];
                 default:
-                    Console.WriteLine("Please type a number from 1 to 7.");
+                    Console.WriteLine("Please type a number from 1 to 8.");
                     break;
             }
         }

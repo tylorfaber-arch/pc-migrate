@@ -5,6 +5,7 @@ using PcMigrate.Core;
 using PcMigrate.Core.Apply;
 using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
+using PcMigrate.Core.Clone;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
@@ -65,6 +66,10 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "measureUsers" => MeasureUsers(),
         "planApps" => await PlanApps(),
         "checkUpdate" => await CheckUpdate(),
+        "listDisks" => await Task.Run(ListDisks),
+        "planClone" => await Task.Run(() => PlanClone(Int(args, "from", -1), Int(args, "to", -1)).View),
+        "shrinkSource" => await Task.Run(() => ShrinkSource(Int(args, "from", -1), Int(args, "to", -1))),
+        "clone" => await Clone(Int(args, "from", -1), Int(args, "to", -1)),
         "installUpdate" => await InstallUpdate(),
         "listDrives" => await Task.Run(ListDrives),
         "unlockDrive" => await Task.Run(() => UnlockDrive(Str(args, "root"), Str(args, "key"))),
@@ -95,6 +100,69 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             appCount = _inventory.Apps.Count,
             users = _inventory.Users.Select(u => new { name = u.UserName, path = u.ProfilePath }),
         };
+    }
+
+    private static List<object> ListDisks() =>
+        Disks.List().Select(d => (object)new
+        {
+            number = d.Number, model = d.Model, serial = d.Serial, size = d.Size, bus = d.Bus, isSystem = d.IsSystem,
+            used = d.Partitions.Sum(p => p.UsedBytes ?? 0),
+            letters = d.Partitions.Where(p => p.DriveLetter is not null).Select(p => p.DriveLetter + ":"),
+            hasWindows = d.Partitions.Any(p => p.DriveLetter is { } l && Directory.Exists(l + @":\Windows\System32")),
+        }).ToList();
+
+    private static (ClonePlan Plan, object View) PlanClone(int from, int to)
+    {
+        var disks = Disks.List();
+        var source = disks.FirstOrDefault(d => d.Number == from) ?? throw new InvalidOperationException("Pick the drive to copy from.");
+        var target = disks.FirstOrDefault(d => d.Number == to) ?? throw new InvalidOperationException("Pick the drive to copy to.");
+        var plan = ClonePlanner.Plan(source, target);
+        static string Label(PartitionInfo p) =>
+            p.IsEfi ? "Boot (EFI)" : p.IsMsr ? "Reserved" : p.IsRecovery ? "Recovery" : p.DriveLetter is { } d ? $"{d}: {p.FileSystem}" : p.FileSystem ?? "Data";
+        return (plan, new
+        {
+            canRun = plan.CanRun,
+            problem = plan.Problem,
+            shrinkBy = plan.ShrinkSourceBy,
+            shrinkLetter = plan.ShrinkSourceBy > 0 ? plan.Main?.DriveLetter : null,
+            bytesToCopy = plan.CanRun ? plan.BytesToCopy : 0,
+            source = new { number = source.Number, model = source.Model, size = source.Size },
+            target = new { number = target.Number, model = target.Model, size = target.Size, serial = target.Serial },
+            partitions = plan.Partitions.Select(p => new { label = Label(p.Source), from = p.Source.Length, to = p.Length, grows = p.Grows }),
+        });
+    }
+
+    private static object ShrinkSource(int from, int to)
+    {
+        var (plan, _) = PlanClone(from, to);
+        if (plan.ShrinkSourceBy <= 0 || plan.Main?.DriveLetter is not { } letter) throw new InvalidOperationException("Nothing to shrink.");
+        DiskCloner.ShrinkVolume(letter, plan.ShrinkSourceBy);
+        return PlanClone(from, to).View;
+    }
+
+    private async Task<object> Clone(int from, int to)
+    {
+        var (plan, _) = await Task.Run(() => PlanClone(from, to));
+        if (!plan.CanRun) throw new InvalidOperationException(plan.Problem);
+        var ct = BeginWork();
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"clone-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        using var log = new GuiLog(Post, logPath) { OnProgress = (_, bytes) => _notify.Progress(bytes, plan.BytesToCopy) };
+        try
+        {
+            var result = await Task.Run(() => new DiskCloner(log).RunAsync(plan, ct), ct);
+            foreach (var note in result.Notes) log.Warn(note);
+            _notify.Finished("Clone finished", $"{CaptureEngine.FormatBytes(result.BytesCopied)} copied to {plan.Target.Model} in {(int)result.Elapsed.TotalMinutes} min.", logPath);
+            return new { bytes = result.BytesCopied, seconds = result.Elapsed.TotalSeconds, notes = result.Notes, logPath };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Clone stopped", Friendly(ex), logPath);
+            throw;
+        }
+        finally
+        {
+            EndWork();
+        }
     }
 
     private UpdateInfo? _update;

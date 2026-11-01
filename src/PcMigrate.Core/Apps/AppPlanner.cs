@@ -81,12 +81,19 @@ public static partial class AppPlanner
         var name = app.Name;
         if (app.UninstallString?.Contains("steam://", StringComparison.OrdinalIgnoreCase) == true)
             return (AppMethod.Manual, "A Steam game. Install it from your Steam library on the new PC; save files in your folders were copied.");
-        if (Office().IsMatch(name))
+        // OneNote, Outlook and the rest of Office share one Click-to-Run install that can't be copied.
+        if (Office().IsMatch(name) || app.UninstallString?.Contains("OfficeClickToRun", StringComparison.OrdinalIgnoreCase) == true)
             return (AppMethod.Manual, "Office is tied to your Microsoft account. Install it from office.com and sign in.");
+        if (SqlServer().IsMatch(name))
+            return (AppMethod.Manual, "A database server. Install SQL Server fresh, then move each database with a backup and restore; copying its files won't work.");
 
         if (winget is not null)
             return (AppMethod.Reinstall, "Installed fresh on the new PC, then your settings are copied over.");
 
+        // Visual Studio Installer keeps its own records of what it installed (SSMS, Visual Studio, Build Tools).
+        if (app.UninstallString?.Contains("Visual Studio\\Installer", StringComparison.OrdinalIgnoreCase) == true ||
+            app.UninstallString?.Contains("vs_installer", StringComparison.OrdinalIgnoreCase) == true)
+            return (AppMethod.Manual, "Installed through the Visual Studio Installer, which has to install it again. Get it from Microsoft's website.");
         if (Driver().IsMatch(name) || Driver().IsMatch(app.Publisher ?? ""))
             return (AppMethod.Manual, "Hardware software. The new PC needs the version made for its own hardware.");
         if (Security().IsMatch(name))
@@ -130,8 +137,12 @@ public static partial class AppPlanner
     [GeneratedRegex(@"^(microsoft visual c\+\+|microsoft \.net|microsoft asp\.net|microsoft windows desktop runtime|windows software development kit|windows sdk|microsoft update health|microsoft edge|microsoft onedrive|windows pc health check|microsoft gameinput|vs_|microsoft visual studio installer|update for |security update|hotfix)|webview2|\bredistributable\b", RegexOptions.IgnoreCase)]
     private static partial Regex Hidden();
 
-    [GeneratedRegex(@"^(microsoft (office|365|project|visio)|office 16 click-to-run)", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(microsoft (office|365|project|visio|onenote|outlook|word|excel|powerpoint|access|publisher)|office 16 click-to-run)", RegexOptions.IgnoreCase)]
     private static partial Regex Office();
+
+    // The database engine itself, not its tools (Management Studio, ODBC drivers).
+    [GeneratedRegex(@"^microsoft sql server (19|20)\d\d\b(?!.*\b(management studio|setup|odbc|ole db)\b)", RegexOptions.IgnoreCase)]
+    private static partial Regex SqlServer();
 
     [GeneratedRegex(@"\bdriver\b|\bchipset\b|^(intel|nvidia|amd|advanced micro devices|realtek|synaptics|elan|qualcomm|dolby|conexant|broadcom)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Driver();
