@@ -45,6 +45,11 @@ public sealed class Inventory
 
 public static class ToolInfo
 {
-    public static string Version { get; } =
-        typeof(ToolInfo).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    /// <summary>
+    /// Builds from GitHub carry the build number as the fourth part (0.1.0.57), which is also
+    /// the release tag; the updater compares it. Local builds are 0.1.0.0.
+    /// </summary>
+    public static System.Version FullVersion { get; } = typeof(ToolInfo).Assembly.GetName().Version ?? new System.Version(0, 0, 0, 0);
+
+    public static string Version { get; } = FullVersion.Revision > 0 ? FullVersion.ToString(4) : FullVersion.ToString(3);
 }

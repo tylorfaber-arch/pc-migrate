@@ -48,6 +48,10 @@ settings and programs come off it the same way, and the drive is only read. A Bi
 for its 48-digit recovery key (at aka.ms/myrecoverykey for the Microsoft account the old PC used).
 The drive can also be sent to another PC over the network or saved to a second external drive.
 
+**Updates.** When it starts, pc-migrate checks GitHub for a newer version and offers it in a bar at the
+top: **Update now** downloads it, checks it against GitHub's checksum, swaps it in and restarts.
+The command-line tool does the same with `pcmigrate-cli update`. Nothing is checked without internet.
+
 When a job finishes or stops, Windows shows a notification and the taskbar button flashes, so you
 can walk away from a long copy. Clicking the notification opens the log or report.
 

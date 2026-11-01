@@ -102,6 +102,16 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 }
 .back:hover { color: var(--text); background: var(--surface-2); }
 
+/* ---------- update bar ---------- */
+.update-bar {
+  display: none; align-items: center; gap: 12px; padding: 10px 28px;
+  background: var(--accent-soft); color: var(--text); border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.update-bar.show { display: flex; }
+.update-bar .spacer { flex: 1; }
+.update-bar a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.update-bar .btn { padding: 6px 14px; font-size: 13px; }
+
 /* ---------- cards ---------- */
 .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .choice {
@@ -313,6 +323,13 @@ footer .grow { flex: 1; }
   <div class="steps" id="steps"></div>
   <div class="pc-chip"><svg width="14" height="14"><use href="#i-pc"/></svg><span id="pcLabel">This PC</span><b id="pcName">…</b></div>
 </header>
+
+<div class="update-bar" id="updateBar">
+  <span id="updateText"></span><a id="updateNotes">What's new</a>
+  <span class="spacer"></span>
+  <button class="btn ghost" id="updateLater">Later</button>
+  <button class="btn" id="updateNow">Update now</button>
+</div>
 
 <main>
   <!-- HOME -->
@@ -629,7 +646,26 @@ async function init() {
   $("ver").textContent = "v" + state.info.version;
   $("footLeft").textContent = `${state.info.users.length} ${state.info.users.length === 1 ? "person" : "people"} · ${state.info.appCount} programs on this PC`;
   show("home");
+  checkUpdate();
 }
+
+// ----- updates -----
+async function checkUpdate() {
+  let u;
+  try { u = await call("checkUpdate"); } catch { return; }
+  if (!u) return;
+  $("updateText").innerHTML = `<b>pc-migrate ${esc(u.version)}</b> is out (you have ${esc(state.here.version)}).`;
+  $("updateNotes").onclick = () => call("openPath", { path: u.page });
+  $("updateBar").classList.add("show");
+}
+$("updateLater").addEventListener("click", () => $("updateBar").classList.remove("show"));
+$("updateNow").addEventListener("click", async () => {
+  const b = $("updateNow"); b.disabled = true; $("updateLater").disabled = true;
+  $("updateText").textContent = "Downloading the update…";
+  try { await call("installUpdate"); $("updateText").textContent = "Restarting into the new version…"; }
+  catch (e) { toast(e.message); $("updateText").textContent = "The update didn't install."; b.disabled = false; $("updateLater").disabled = false; }
+});
+on("updateProgress", m => { $("updateText").textContent = `Downloading the update… ${Math.floor(m.fraction * 100)}%`; });
 
 // ----- dead PC: its drive, plugged in here -----
 let drives = [], pickedDrive = null;
@@ -1018,6 +1054,7 @@ const Mock = {
       case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, fromComputer: "TYLOR-DESKTOP" });
       case "startReceive": return reply({ code: "482913", addresses: ["192.168.1.42"] });
       case "planApps": return reply(MOCK_APPS, 1600);
+      case "checkUpdate": return reply({ version: "0.1.0.61", notes: "", page: "https://github.com/tylorfaber-arch/pc-migrate/releases/latest", sizeBytes: 70e6 }, 800);
       case "listDrives": return reply([
         { root: "E:\\", label: "Windows", locked: false, computerName: "SAM-OLD-LAPTOP", usedBytes: 212e9, totalBytes: 476e9, users: ["Sam", "Admin"] },
         { root: "F:\\", locked: true, users: [] }], 900);

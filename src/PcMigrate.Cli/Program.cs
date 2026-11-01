@@ -7,13 +7,30 @@ using PcMigrate.Core.Capture;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
+using PcMigrate.Core.Update;
 using PcMigrate.Core.Windows;
 
 // Double-clicked in Explorer: there are no arguments, so ask what to do instead of
 // printing help into a window that closes immediately, and keep the window open at the end.
 var interactive = args.Length == 0;
+var exePath = Environment.ProcessPath!;
+Updater.CleanUp(exePath);
 if (interactive)
 {
+    // A quick look for a newer version, so people who double-click find out about it.
+    using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    try
+    {
+        if (await Updater.CheckAsync("pcmigrate-cli.exe", ToolInfo.FullVersion, quick.Token) is { } newer)
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"pc-migrate {newer.Tag.TrimStart('v')} is out (you have {ToolInfo.Version}). Type U below to update.");
+            Console.ResetColor();
+            Console.WriteLine();
+        }
+    }
+    catch (OperationCanceledException) { }
+
     var chosen = Menu.Ask();
     if (chosen is null) return 0;
     args = chosen;
@@ -82,6 +99,7 @@ async Task<int> Run(string[] argv)
         return cli.Command switch
         {
             "drives" => Drives(),
+            "update" => await SelfUpdate(),
             "scan" => Scan(),
             "capture" => await Capture(),
             "send" => await Send(),
@@ -95,13 +113,31 @@ async Task<int> Run(string[] argv)
         return Fail("Cancelled.");
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or InvalidDataException
-                                   or FileNotFoundException or SinkWriteException or System.Net.Sockets.SocketException or IOException)
+                                   or FileNotFoundException or SinkWriteException or System.Net.Sockets.SocketException or IOException or HttpRequestException)
     {
         return Fail(ex.Message);
     }
     finally
     {
         pulled?.Dispose();
+    }
+
+    async Task<int> SelfUpdate()
+    {
+        cli.RejectUnknown();
+        log.Info("Checking for a newer version...");
+        var update = await Updater.CheckAsync("pcmigrate-cli.exe", ToolInfo.FullVersion, cts.Token);
+        if (update is null) return Done($"You have the newest version ({ToolInfo.Version}).", 0);
+        log.Info($"Downloading {update.Tag}...");
+        var last = -1;
+        var downloaded = await Updater.DownloadAsync(update, exePath, new Progress<double>(f =>
+        {
+            var pct = (int)(f * 100);
+            if (pct / 10 != last / 10) { last = pct; Console.Write($"\r  {pct}%   "); }
+        }), cts.Token);
+        Console.WriteLine();
+        Updater.Swap(exePath, downloaded);
+        return Done($"Updated to {update.Tag.TrimStart('v')}. Run pcmigrate-cli again to use it.", 0);
     }
 
     int Drives()
@@ -331,6 +367,7 @@ async Task<int> Run(string[] argv)
             Other commands:
               pcmigrate-cli scan [--json]  List users, how much would be copied, and installed programs.
               pcmigrate-cli version
+              pcmigrate-cli update         Download and install the newest version.
 
             Options for capture and send:
               --user <name>[,<name>]       Only these users (default: everyone).

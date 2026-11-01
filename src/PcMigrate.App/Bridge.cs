@@ -8,6 +8,7 @@ using PcMigrate.Core.Capture;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
+using PcMigrate.Core.Update;
 using PcMigrate.Core.Windows;
 
 namespace PcMigrate.App;
@@ -63,6 +64,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "init" => await Init(),
         "measureUsers" => MeasureUsers(),
         "planApps" => await PlanApps(),
+        "checkUpdate" => await CheckUpdate(),
+        "installUpdate" => await InstallUpdate(),
         "listDrives" => await Task.Run(ListDrives),
         "unlockDrive" => await Task.Run(() => UnlockDrive(Str(args, "root"), Str(args, "key"))),
         "useDrive" => await UseDrive(Str(args, "root")),
@@ -92,6 +95,45 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             appCount = _inventory.Apps.Count,
             users = _inventory.Users.Select(u => new { name = u.UserName, path = u.ProfilePath }),
         };
+    }
+
+    private UpdateInfo? _update;
+    private static string ExePath => Environment.ProcessPath ?? Application.ExecutablePath;
+
+    private async Task<object?> CheckUpdate()
+    {
+        // Now that the app has started properly, the version an update replaced can go.
+        Updater.CleanUp(ExePath);
+        _update = await Updater.CheckAsync("pc-migrate.exe", ToolInfo.FullVersion);
+        if (_update is null) return null;
+        return new { version = _update.Tag.TrimStart('v'), notes = _update.Notes, page = _update.PageUrl, sizeBytes = _update.Size };
+    }
+
+    /// <summary>Downloads the new version, swaps it in, and restarts into it.</summary>
+    private async Task<object?> InstallUpdate()
+    {
+        if (_update is null) throw new InvalidOperationException("There's no update to install.");
+        var ct = BeginWork();
+        try
+        {
+            var progress = new Progress<double>(f => Post("updateProgress", new { fraction = f }));
+            var downloaded = await Updater.DownloadAsync(_update, ExePath, progress, ct);
+            try
+            {
+                Updater.Swap(ExePath, downloaded);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException($"Couldn't replace pc-migrate.exe ({ex.Message}). Download the new version from GitHub instead.");
+            }
+        }
+        finally
+        {
+            EndWork();
+        }
+        Process.Start(new ProcessStartInfo(ExePath) { UseShellExecute = true });
+        form.BeginInvoke(form.Close);
+        return null;
     }
 
     private ISystemProbe SourceProbe => (ISystemProbe?)_pulledProbe ?? _probe;
@@ -425,6 +467,12 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
 
     private static object? OpenPath(string path)
     {
+        // Release notes; only the project's own GitHub pages are opened in the browser.
+        if (path.StartsWith($"https://github.com/{Updater.Repo}/", StringComparison.OrdinalIgnoreCase))
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            return null;
+        }
         if (File.Exists(path)) Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         else if (Directory.Exists(path)) Process.Start(new ProcessStartInfo("explorer.exe", $"\"{path}\""));
         return null;

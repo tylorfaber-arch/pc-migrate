@@ -65,6 +65,8 @@ internal static class Menu
                 }
                 case "7":
                     return ["help"];
+                case "u" or "U":
+                    return ["update"];
                 default:
                     Console.WriteLine("Please type a number from 1 to 7.");
                     break;
