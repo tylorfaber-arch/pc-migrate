@@ -117,6 +117,9 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
 
             log.Info($"Captured {files:N0} files ({FormatBytes(bytes)}). Writing manifest...");
             await sink.CompleteAsync(manifest, ct);
+            var manual = manifest.Apps.Count(a => a.Method == AppMethod.Manual);
+            log.Info($"Done: {files:N0} files ({FormatBytes(bytes)}), {manifest.Apps.Count - manual} program(s) saved, " +
+                     $"{manual} to install by hand, {manifest.Warnings.Count} warning(s).");
             return manifest;
         }
         finally

@@ -14,7 +14,7 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
     public delegate Task<bool> AddFileFn(string fullPath, string storePath, DateTime lastWriteUtc);
 
     // Program folders are copied whole; only obvious junk is left out.
-    private static readonly CaptureRules ProgramRules = new() { ExcludedFolderNames = [], ExcludedFilePatterns = ["*.tmp", "*.partial"] };
+    private static readonly CaptureRules ProgramRules = new() { ExcludedFolderNames = [], ExcludedFilePatterns = ["*.tmp", "*.partial", "desktop.ini", "thumbs.db"] };
 
     public async Task RunAsync(IReadOnlyList<AppEntry> apps, List<UserProfileInfo> users, Manifest manifest,
         Func<string, string> mapPath, AddFileFn addFile, IMigrationSink sink, CancellationToken ct)
