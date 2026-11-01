@@ -9,7 +9,7 @@ public static partial class AppPlanner
 {
     public static List<AppEntry> Plan(Inventory inventory, IAppPlatform platform, IReadOnlyCollection<UserProfileInfo> users, CaptureRules rules)
     {
-        var winget = platform.ListWinget();
+        var winget = platform.ListWinget(inventory.Apps.Where(a => !IsHidden(a)).ToList());
         var byName = new Dictionary<string, WingetRow>();
         foreach (var row in winget ?? [])
         {
@@ -46,7 +46,7 @@ public static partial class AppPlanner
             if (method != AppMethod.Manual)
             {
                 var owners = app.Scope == "Machine" ? users : users.Where(u => u.UserName.Equals(app.Scope, StringComparison.OrdinalIgnoreCase)).ToList();
-                entry.SettingsFolders.AddRange(SettingsLocator.FindFolders(entry, owners.Select(u => u.ProfilePath), rules));
+                entry.SettingsFolders.AddRange(SettingsLocator.FindFolders(entry, owners.Select(u => Readable(platform, u.ProfilePath)), rules));
                 entry.UserRegistryKeys.AddRange(SettingsLocator.FindKeys(entry, owners.SelectMany(u => userKeys[u.UserName]).Distinct(StringComparer.OrdinalIgnoreCase)));
             }
             if (method == AppMethod.Copy && app.Scope == "Machine")
@@ -95,7 +95,7 @@ public static partial class AppPlanner
             return (AppMethod.Manual, "Installed with Windows Installer, so copying it would break updates and uninstalling. Get it from the maker's website.");
 
         var location = app.InstallLocation?.Trim().Trim('"').TrimEnd('\\');
-        if (string.IsNullOrEmpty(location) || !Directory.Exists(location))
+        if (string.IsNullOrEmpty(location) || !Directory.Exists(Readable(platform, location)))
             return (AppMethod.Manual, hasWinget ? "Couldn't tell where it's installed." : "Couldn't tell where it's installed. (winget isn't on this PC, so nothing can be reinstalled automatically.)");
         if (IsTooBroad(location))
             return (AppMethod.Manual, "Its install folder is shared with other programs, so it can't be copied on its own.");
@@ -104,6 +104,8 @@ public static partial class AppPlanner
 
         return (AppMethod.Copy, "Not available to install automatically, so its program folder and settings are copied as they are. Works for most simple programs.");
     }
+
+    private static string Readable(IAppPlatform platform, string path) => platform.Offline?.ToReadable(path) ?? path;
 
     private static bool IsTooBroad(string location)
     {

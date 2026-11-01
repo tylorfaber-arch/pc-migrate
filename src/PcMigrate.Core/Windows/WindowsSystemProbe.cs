@@ -70,7 +70,12 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
             if (hive is not null) ReadUninstall(hive.Root, $@"HKU\{user.Sid}\{UninstallKey}", user.UserName, true, apps);
         }
 
-        // The same program can show up in more than one place; keep one row each.
+        return Dedupe(apps);
+    }
+
+    /// <summary>The same program can show up in more than one place; keep one row each.</summary>
+    internal static List<InstalledApp> Dedupe(List<InstalledApp> apps)
+    {
         return apps
             .GroupBy(a => (a.Name.ToLowerInvariant(), a.Version, a.Scope))
             .Select(g => g.First())
@@ -81,7 +86,12 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
     private static void ReadUninstall(RegistryKey root, string keyPath, string scope, bool is64, List<InstalledApp> into)
     {
         using var uninstall = root.OpenSubKey(UninstallKey);
-        if (uninstall is null) return;
+        if (uninstall is not null) ReadUninstallKey(uninstall, keyPath, scope, is64, into);
+    }
+
+    /// <summary>Reads one Uninstall key. <paramref name="keyPath"/> is how the old PC would name it (HKLM\SOFTWARE\...).</summary>
+    internal static void ReadUninstallKey(RegistryKey uninstall, string keyPath, string scope, bool is64, List<InstalledApp> into)
+    {
 
         foreach (var name in uninstall.GetSubKeyNames())
         {

@@ -42,6 +42,19 @@ Download `pc-migrate.exe` onto both PCs and double-click it (it asks for admin r
 No network between them? Choose *With an external drive* on the old PC, then *From an external
 drive* on the new one.
 
+**Old PC won't start?** Pull its drive, plug it into the new PC with a USB adapter or dock, and
+choose *The old PC is dead, but I have its drive*. Pick the drive, then *Onto this PC*. Files,
+settings and programs come off it the same way, and the drive is only read. A BitLocker drive asks
+for its 48-digit recovery key (at aka.ms/myrecoverykey for the Microsoft account the old PC used).
+The drive can also be sent to another PC over the network or saved to a second external drive.
+
+**Updates.** When it starts, pc-migrate checks GitHub for a newer version and offers it in a bar at the
+top: **Update now** downloads it, checks it against GitHub's checksum, swaps it in and restarts.
+The command-line tool does the same with `pcmigrate-cli update`. Nothing is checked without internet.
+
+When a job finishes or stops, Windows shows a notification and the taskbar button flashes, so you
+can walk away from a long copy. Clicking the notification opens the log or report.
+
 ### Command line
 
 `pcmigrate-cli.exe` does the same from an administrator terminal, for scripts and remote work:
@@ -50,6 +63,10 @@ drive* on the new one.
 old PC:  pcmigrate-cli capture --to E:\migration         new PC:  pcmigrate-cli apply --from E:\migration
 new PC:  pcmigrate-cli receive                            old PC:  pcmigrate-cli send --host 192.168.1.50 --code 123456
 ```
+
+From a dead PC's drive: `pcmigrate-cli drives` lists plugged-in drives with Windows on them, then
+`pcmigrate-cli capture --from-drive E: --to F:\migration` (or `send --from-drive E: ...`). Add
+`--recovery-key <key>` for a BitLocker drive.
 
 `pcmigrate-cli scan` lists users, sizes and programs. `--dry-run` on apply changes nothing. Use
 `--map olduser=newuser` when account names differ. `pcmigrate-cli help` lists everything.
@@ -63,7 +80,7 @@ new PC:  pcmigrate-cli receive                            old PC:  pcmigrate-cli
 | Outlook signatures, Office templates, Start menu shortcuts, pinned taskbar items, themes | |
 | Wallpaper | |
 | Mapped network drives | Reconnect at next sign-in |
-| Saved Wi-Fi networks, with passwords | |
+| Saved Wi-Fi networks, with passwords | From a pulled drive the networks move but not their passwords (Windows encrypts them with the old PC's own key), so each asks once. |
 | **Programs** | See *How programs move* below |
 
 Caches and temporary files are skipped. OneDrive "online-only" files are skipped since OneDrive
@@ -103,6 +120,14 @@ Licence keys and sign-ins don't move.
   name: folders in `AppData\Roaming`, `AppData\Local` and `AppData\LocalLow`, and keys under
   `HKEY_CURRENT_USER\Software`, called after the program (or *Maker\Program*). Registry settings are
   exported with `reg export` and, on the new PC, rewritten for the right account before `reg import`.
+- **A drive from a dead PC.** Its registry files (`Windows\System32\config\SOFTWARE` and `SYSTEM`,
+  and each person's `NTUSER.DAT`) are copied off the drive and the copies loaded, so the drive is
+  never written to. Everything is recorded with the old PC's own paths (`C:\Users\sam`) and only
+  translated to where the drive is plugged in (`E:\Users\sam`) when a file is read. Folders that
+  only the old PC's accounts could open are read with Windows' backup right, the way backup
+  programs do, without changing their permissions. winget can't see the old PC's programs, so each
+  one is looked up by name instead. *Onto this PC* reads the drive into a holding folder in
+  `C:\ProgramData\pc-migrate` and then moves (not copies) the files into place.
 - **Finding the new PC.** The old PC broadcasts a short question on UDP port 47801 and every PC
   waiting to receive answers with its name, so nobody has to look up an IP address.
 - **The app window.** The screens are a web page (`src/PcMigrate.App/ui/index.html`) shown with
@@ -160,4 +185,7 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 1. Files and settings ← done
 2. Move installed programs ← done (winget reinstall + settings, or copy as is)
 3. Step-by-step app window ← done early; code signing still to do
-4. Licensing, installer and a place to sell it
+4. Rescue a dead PC's drive over USB ← done
+5. Full disk clone, drive to drive (including external to external)
+6. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
+7. Licensing, installer and a place to sell it

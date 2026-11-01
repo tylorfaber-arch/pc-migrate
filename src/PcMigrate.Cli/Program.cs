@@ -7,13 +7,30 @@ using PcMigrate.Core.Capture;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
+using PcMigrate.Core.Update;
 using PcMigrate.Core.Windows;
 
 // Double-clicked in Explorer: there are no arguments, so ask what to do instead of
 // printing help into a window that closes immediately, and keep the window open at the end.
 var interactive = args.Length == 0;
+var exePath = Environment.ProcessPath!;
+Updater.CleanUp(exePath);
 if (interactive)
 {
+    // A quick look for a newer version, so people who double-click find out about it.
+    using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    try
+    {
+        if (await Updater.CheckAsync("pcmigrate-cli.exe", ToolInfo.FullVersion, quick.Token) is { } newer)
+        {
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"pc-migrate {newer.Tag.TrimStart('v')} is out (you have {ToolInfo.Version}). Type U below to update.");
+            Console.ResetColor();
+            Console.WriteLine();
+        }
+    }
+    catch (OperationCanceledException) { }
+
     var chosen = Menu.Ask();
     if (chosen is null) return 0;
     args = chosen;
@@ -51,13 +68,38 @@ async Task<int> Run(string[] argv)
         return Fail("pc-migrate needs to run as administrator. Right-click it and choose 'Run as administrator'.");
 
     using var log = new ConsoleLog(cli.Get("log"));
-    var probe = new WindowsSystemProbe(log);
-    var appPlatform = new WindowsAppPlatform(log);
+    ISystemProbe probe = new WindowsSystemProbe(log);
+    IAppPlatform appPlatform = new WindowsAppPlatform(log);
+    OfflineWindows? pulled = null;
 
     try
     {
+        // --from-drive E: reads a drive pulled from a dead PC instead of this PC's own Windows.
+        if (cli.Get("from-drive") is { } driveArg)
+        {
+            if (cli.Command is not ("scan" or "capture" or "send"))
+                return Fail("--from-drive works with scan, capture and send.");
+            var root = driveArg.TrimEnd('\\', '/', ':')[..1] + ":\\";
+            if (cli.Get("recovery-key") is { } key && BitLocker.IsLocked(root))
+            {
+                if (BitLocker.Unlock(root, key) is { } problem) return Fail(problem);
+                log.Info($"Unlocked {root}.");
+            }
+            else if (BitLocker.IsLocked(root))
+            {
+                return Fail($"{root} is locked with BitLocker. Add --recovery-key <48 digits> (find it at aka.ms/myrecoverykey).");
+            }
+            log.Info($"Opening the Windows on {root}...");
+            pulled = OfflineWindows.Open(root);
+            probe = new OfflineSystemProbe(pulled, log);
+            appPlatform = new OfflineAppPlatform(pulled, log);
+            log.Info($"Found {pulled.ComputerName} ({pulled.OsDescription}).");
+        }
+
         return cli.Command switch
         {
+            "drives" => Drives(),
+            "update" => await SelfUpdate(),
             "scan" => Scan(),
             "capture" => await Capture(),
             "send" => await Send(),
@@ -71,9 +113,51 @@ async Task<int> Run(string[] argv)
         return Fail("Cancelled.");
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or InvalidDataException
-                                   or FileNotFoundException or SinkWriteException or System.Net.Sockets.SocketException)
+                                   or FileNotFoundException or SinkWriteException or System.Net.Sockets.SocketException or IOException or HttpRequestException)
     {
         return Fail(ex.Message);
+    }
+    finally
+    {
+        pulled?.Dispose();
+    }
+
+    async Task<int> SelfUpdate()
+    {
+        cli.RejectUnknown();
+        log.Info("Checking for a newer version...");
+        var update = await Updater.CheckAsync("pcmigrate-cli.exe", ToolInfo.FullVersion, cts.Token);
+        if (update is null) return Done($"You have the newest version ({ToolInfo.Version}).", 0);
+        log.Info($"Downloading {update.Tag}...");
+        var last = -1;
+        var downloaded = await Updater.DownloadAsync(update, exePath, new Progress<double>(f =>
+        {
+            var pct = (int)(f * 100);
+            if (pct / 10 != last / 10) { last = pct; Console.Write($"\r  {pct}%   "); }
+        }), cts.Token);
+        Console.WriteLine();
+        Updater.Swap(exePath, downloaded);
+        return Done($"Updated to {update.Tag.TrimStart('v')}. Run pcmigrate-cli again to use it.", 0);
+    }
+
+    int Drives()
+    {
+        cli.RejectUnknown();
+        var drives = OfflineWindows.Find();
+        if (drives.Count == 0)
+        {
+            Console.WriteLine("No plugged-in drives with Windows on them. Plug the old PC's drive in with a USB adapter and try again.");
+            return 0;
+        }
+        Console.WriteLine("Drives from other PCs:");
+        foreach (var d in drives)
+        {
+            if (d.Locked) Console.WriteLine($"  {d.Root,-5} locked with BitLocker (use --recovery-key)");
+            else Console.WriteLine($"  {d.Root,-5} {d.ComputerName ?? "unknown PC",-20} {CaptureEngine.FormatBytes(d.TotalBytes - d.FreeBytes)} used   users: {string.Join(", ", d.Users)}");
+        }
+        Console.WriteLine();
+        Console.WriteLine("Then run, for example:  pcmigrate-cli capture --from-drive E: --to F:\\migration");
+        return 0;
     }
 
     int Scan()
@@ -93,7 +177,7 @@ async Task<int> Run(string[] argv)
         Console.WriteLine("Users and how much would be copied:");
         foreach (var user in inventory.Users)
         {
-            var (files, bytes) = CaptureEngine.Estimate(user, rules);
+            var (files, bytes) = CaptureEngine.Estimate(user, rules, default, probe.Offline);
             Console.WriteLine($"  {user.UserName,-24} {files,10:N0} files  {CaptureEngine.FormatBytes(bytes),10}   {user.ProfilePath}");
         }
         Console.WriteLine();
@@ -273,9 +357,17 @@ async Task<int> Run(string[] argv)
               On the new PC:  pcmigrate-cli receive      (shows a pairing code)
               On the old PC:  pcmigrate-cli send --host <new PC's IP> --code <code>
 
+            From a dead PC's drive, plugged in by USB:
+              pcmigrate-cli drives         List plugged-in drives that have Windows on them.
+              pcmigrate-cli capture --from-drive E: --to F:\migration
+              pcmigrate-cli send --from-drive E: --host <new PC's IP> --code <code>
+              --recovery-key <key>         Unlock a BitLocker drive first.
+              (Wi-Fi passwords can't be read off a drive; the networks come over without them.)
+
             Other commands:
               pcmigrate-cli scan [--json]  List users, how much would be copied, and installed programs.
               pcmigrate-cli version
+              pcmigrate-cli update         Download and install the newest version.
 
             Options for capture and send:
               --user <name>[,<name>]       Only these users (default: everyone).

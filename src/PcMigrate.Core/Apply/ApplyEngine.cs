@@ -26,6 +26,11 @@ public sealed class ApplyOptions
     public bool IncludeUserSettings { get; init; } = true;
     public bool DryRun { get; init; }
     public bool IncludeApps { get; init; } = true;
+    /// <summary>
+    /// Move files out of the store instead of copying them. Used when the store was only made
+    /// on this PC as a stepping stone (from a pulled drive), so it doesn't take up the space twice.
+    /// </summary>
+    public bool MoveFromStore { get; init; }
     /// <summary>Keys of the programs to install or copy. Null means every program that can move.</summary>
     public IReadOnlySet<string>? AppKeys { get; init; }
 }
@@ -129,7 +134,7 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatf
                 continue;
             }
 
-            if (await CopyFromStoreAsync(storeRoot, file, destination, warn, ct))
+            if (options.MoveFromStore ? await MoveFromStoreAsync(storeRoot, file, destination, warn, ct) : await CopyFromStoreAsync(storeRoot, file, destination, warn, ct))
             {
                 result.FilesCopied++;
                 result.BytesCopied += file.Length;
@@ -172,6 +177,28 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatf
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SinkWriteException)
         {
             try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            warn($"Could not write {destination}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static async Task<bool> MoveFromStoreAsync(string storeRoot, ManifestFile file, string destination, Action<string> warn, CancellationToken ct)
+    {
+        var sourcePath = StorePath.ToLocal(storeRoot, file.StorePath);
+        try
+        {
+            if (!string.Equals(await HashingCopy.HashFileAsync(sourcePath, ct), file.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                warn($"Skipped damaged file in the store: {file.StorePath}");
+                return false;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Move(sourcePath, destination, overwrite: true);
+            File.SetLastWriteTimeUtc(destination, file.LastWriteUtc);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
             warn($"Could not write {destination}: {ex.Message}");
             return false;
         }

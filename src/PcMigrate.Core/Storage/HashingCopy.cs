@@ -44,14 +44,28 @@ internal static class HashingCopy
         return Convert.ToHexString(await sha.ComputeHashAsync(stream, ct)).ToLowerInvariant();
     }
 
-    /// <summary>Opens a file for reading while letting other programs keep it open.</summary>
-    public static FileStream OpenForRead(string path) =>
-        new(path, new FileStreamOptions
+    /// <summary>
+    /// Opens a file for reading while letting other programs keep it open. If its
+    /// permissions shut us out, tries again with backup rights (see BackupFile).
+    /// </summary>
+    public static FileStream OpenForRead(string path)
+    {
+        try
         {
-            Mode = FileMode.Open,
-            Access = FileAccess.Read,
-            Share = FileShare.ReadWrite | FileShare.Delete,
-            BufferSize = 0,
-            Options = FileOptions.SequentialScan | FileOptions.Asynchronous,
-        });
+            return new(path, new FileStreamOptions
+            {
+                Mode = FileMode.Open,
+                Access = FileAccess.Read,
+                Share = FileShare.ReadWrite | FileShare.Delete,
+                BufferSize = 0,
+                Options = FileOptions.SequentialScan | FileOptions.Asynchronous,
+            });
+        }
+        catch (UnauthorizedAccessException) when (OperatingSystem.IsWindows())
+        {
+            var stream = Windows.BackupFile.OpenRead(path);
+            if (stream is null) throw;
+            return stream;
+        }
+    }
 }

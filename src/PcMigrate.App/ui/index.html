@@ -102,6 +102,16 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 }
 .back:hover { color: var(--text); background: var(--surface-2); }
 
+/* ---------- update bar ---------- */
+.update-bar {
+  display: none; align-items: center; gap: 12px; padding: 10px 28px;
+  background: var(--accent-soft); color: var(--text); border-bottom: 1px solid var(--border); font-size: 14px;
+}
+.update-bar.show { display: flex; }
+.update-bar .spacer { flex: 1; }
+.update-bar a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.update-bar .btn { padding: 6px 14px; font-size: 13px; }
+
 /* ---------- cards ---------- */
 .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .choice {
@@ -120,6 +130,12 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .choice .icon svg { width: 28px; height: 28px; }
 .choice h2 { font-size: 18px; }
 .choice p { color: var(--muted); }
+.choices.three { grid-template-columns: repeat(3, 1fr); }
+.choice.wide { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 18px; padding: 18px 24px; }
+.choice.wide .icon { margin-bottom: 0; flex: none; }
+.choice.wide p { margin-top: 2px; }
+.drive-row .lock { display: flex; gap: 10px; margin-top: 10px; }
+.drive-row .lock input { flex: 1; font-family: ui-monospace, Consolas, monospace; letter-spacing: .02em; }
 .choice .tag {
   position: absolute; top: 18px; right: 18px; font-size: 11px; font-weight: 600; letter-spacing: .02em;
   padding: 3px 9px; border-radius: 999px; background: var(--ok-soft); color: var(--ok);
@@ -292,6 +308,8 @@ footer .grow { flex: 1; }
     <symbol id="i-new" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="4" width="13" height="10" rx="1.5"/><path d="M12 18h5M14.5 14v4"/><path d="M7 9H3m0 0 2-2M3 9l2 2"/></symbol>
     <symbol id="i-net" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M2 9.5a14 14 0 0 1 20 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/></symbol>
     <symbol id="i-drive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M5 13 7.5 5h9L19 13"/><circle cx="17" cy="16.5" r=".9" fill="currentColor"/></symbol>
+    <symbol id="i-hdd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="10" r=".8" fill="currentColor"/><path d="M12 10l3.5 7M8 18h1"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></symbol>
@@ -303,8 +321,15 @@ footer .grow { flex: 1; }
 <header>
   <div class="brand"><svg><use href="#logo"/></svg>pc-migrate <span class="ver" id="ver"></span></div>
   <div class="steps" id="steps"></div>
-  <div class="pc-chip"><svg width="14" height="14"><use href="#i-pc"/></svg><span>This PC</span><b id="pcName">…</b></div>
+  <div class="pc-chip"><svg width="14" height="14"><use href="#i-pc"/></svg><span id="pcLabel">This PC</span><b id="pcName">…</b></div>
 </header>
+
+<div class="update-bar" id="updateBar">
+  <span id="updateText"></span><a id="updateNotes">What's new</a>
+  <span class="spacer"></span>
+  <button class="btn ghost" id="updateLater">Later</button>
+  <button class="btn" id="updateNow">Update now</button>
+</div>
 
 <main>
   <!-- HOME -->
@@ -324,6 +349,11 @@ footer .grow { flex: 1; }
         <h2>This is my new PC</h2>
         <p>Bring everything over from the old PC onto this one.</p>
       </button>
+      <button class="choice wide" data-go="pulled">
+        <div class="icon"><svg><use href="#i-hdd"/></svg></div>
+        <div><h2>The old PC is dead, but I have its drive</h2>
+        <p>Plug the drive into this PC with a USB adapter. Files, settings and programs come off it the same way.</p></div>
+      </button>
     </div>
   </section>
 
@@ -342,6 +372,42 @@ footer .grow { flex: 1; }
         <div class="icon"><svg><use href="#i-drive"/></svg></div>
         <h2>With an external drive</h2>
         <p>Save to a USB drive, then plug it into the new PC.</p>
+      </button>
+    </div>
+  </section>
+
+  <!-- PULLED DRIVE: PICK IT -->
+  <section class="screen" id="s-pulled">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Which drive is from the old PC?</h1><p>Plug it in with a USB adapter or dock. pc-migrate only reads it; nothing on it is changed.</p></div>
+    <div class="card">
+      <div class="card-head"><h2>Drives with Windows on them</h2><span class="spacer"></span><button class="btn ghost" id="refreshDrives">Look again</button></div>
+      <div class="rows" id="driveRows"></div>
+      <div id="drivesLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for drives…</div>
+    </div>
+    <div class="actions"><span class="muted" id="driveNote"></span><span class="spacer"></span><button class="btn" id="pulledNext" disabled>Next</button></div>
+  </section>
+
+  <!-- PULLED DRIVE: WHERE TO -->
+  <section class="screen" id="s-pulled-method">
+    <button class="back" data-go="pulled"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Where should it go?</h1><p id="pulledSub"></p></div>
+    <div class="choices three">
+      <button class="choice" id="goHere">
+        <span class="tag">Easiest</span>
+        <div class="icon"><svg><use href="#i-new"/></svg></div>
+        <h2>Onto this PC</h2>
+        <p>This is the new PC. Everything is put straight into place here.</p>
+      </button>
+      <button class="choice" data-go="old-find">
+        <div class="icon"><svg><use href="#i-net"/></svg></div>
+        <h2>Over the network</h2>
+        <p>Send it to the new PC. Start pc-migrate there first.</p>
+      </button>
+      <button class="choice" data-go="old-drive">
+        <div class="icon"><svg><use href="#i-drive"/></svg></div>
+        <h2>To an external drive</h2>
+        <p>Save it to another drive to take to the new PC.</p>
       </button>
     </div>
   </section>
@@ -390,9 +456,9 @@ footer .grow { flex: 1; }
     </div>
     <div class="card">
       <h2>Settings</h2>
-      <label class="toggle-row"><div class="grow"><div>Wi-Fi networks and passwords</div><div class="sub">So the new PC connects on its own</div></div><input type="checkbox" class="switch" id="optWifi" checked></label>
+      <label class="toggle-row"><div class="grow"><div id="wifiLabel">Wi-Fi networks and passwords</div><div class="sub" id="wifiSub">So the new PC connects on its own</div></div><input type="checkbox" class="switch" id="optWifi" checked></label>
       <label class="toggle-row"><div class="grow"><div>Wallpaper and mapped network drives</div><div class="sub">Per person</div></div><input type="checkbox" class="switch" id="optSettings" checked></label>
-      <label class="toggle-row"><div class="grow"><div>Copy files that are open</div><div class="sub">Takes a snapshot first, so Outlook and browsers don't need closing</div></div><input type="checkbox" class="switch" id="optShadow" checked></label>
+      <label class="toggle-row" id="shadowRow"><div class="grow"><div>Copy files that are open</div><div class="sub">Takes a snapshot first, so Outlook and browsers don't need closing</div></div><input type="checkbox" class="switch" id="optShadow" checked></label>
     </div>
     <div class="actions"><span class="muted" id="totalSize"></span><span class="spacer"></span><button class="btn" id="startCapture">Start moving</button></div>
   </section>
@@ -556,10 +622,14 @@ function fmtTime(s) {
 }
 function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
 
-const state = { info: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [] };
-const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+const state = { info: null, here: null, pulled: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [], move: false };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
+  // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
+  if (name === "old-method" && state.pulled) name = "pulled-method";
+  if (name === "home" && state.pulled) leaveDrive();
+  if (name === "pulled") findDrives();
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
   $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
@@ -571,12 +641,84 @@ document.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", 
 
 // ----- start -----
 async function init() {
-  state.info = await call("init");
+  state.info = state.here = await call("init");
   $("pcName").textContent = state.info.computerName;
   $("ver").textContent = "v" + state.info.version;
   $("footLeft").textContent = `${state.info.users.length} ${state.info.users.length === 1 ? "person" : "people"} · ${state.info.appCount} programs on this PC`;
   show("home");
+  checkUpdate();
 }
+
+// ----- updates -----
+async function checkUpdate() {
+  let u;
+  try { u = await call("checkUpdate"); } catch { return; }
+  if (!u) return;
+  $("updateText").innerHTML = `<b>pc-migrate ${esc(u.version)}</b> is out (you have ${esc(state.here.version)}).`;
+  $("updateNotes").onclick = () => call("openPath", { path: u.page });
+  $("updateBar").classList.add("show");
+}
+$("updateLater").addEventListener("click", () => $("updateBar").classList.remove("show"));
+$("updateNow").addEventListener("click", async () => {
+  const b = $("updateNow"); b.disabled = true; $("updateLater").disabled = true;
+  $("updateText").textContent = "Downloading the update…";
+  try { await call("installUpdate"); $("updateText").textContent = "Restarting into the new version…"; }
+  catch (e) { toast(e.message); $("updateText").textContent = "The update didn't install."; b.disabled = false; $("updateLater").disabled = false; }
+});
+on("updateProgress", m => { $("updateText").textContent = `Downloading the update… ${Math.floor(m.fraction * 100)}%`; });
+
+// ----- dead PC: its drive, plugged in here -----
+let drives = [], pickedDrive = null;
+async function findDrives() {
+  pickedDrive = null; $("pulledNext").disabled = true;
+  $("drivesLooking").style.display = "flex"; $("driveRows").innerHTML = ""; $("driveNote").textContent = "";
+  try { drives = await call("listDrives"); } catch (e) { drives = []; toast(e.message); }
+  $("drivesLooking").style.display = "none";
+  renderDrives();
+}
+$("refreshDrives").addEventListener("click", findDrives);
+function renderDrives() {
+  $("driveRows").innerHTML = drives.length ? drives.map(d => d.locked ? `
+    <div class="row drive-row" data-root="${esc(d.root)}">
+      <div class="avatar" style="border-radius:10px"><svg width="20" height="20"><use href="#i-lock"/></svg></div>
+      <div class="grow"><div class="name">${esc(d.root)} is locked with BitLocker</div>
+        <div class="sub">Type its 48-digit recovery key. It's at aka.ms/myrecoverykey for the Microsoft account the old PC used, or ask the IT department.</div>
+        <div class="lock"><input type="text" placeholder="123456-123456-123456-…" data-key="${esc(d.root)}"><button class="btn ghost" data-unlock="${esc(d.root)}">Unlock</button></div></div>
+    </div>` : `
+    <div class="row pc-row drive-row ${pickedDrive === d.root ? "sel" : ""}" data-root="${esc(d.root)}" style="cursor:pointer">
+      <div class="avatar" style="border-radius:10px"><svg width="20" height="20"><use href="#i-hdd"/></svg></div>
+      <div class="grow"><div class="name">${esc(d.computerName || "Windows drive")} <span class="faint" style="font-weight:400">(${esc(d.root)}${d.label ? " · " + esc(d.label) : ""})</span></div>
+        <div class="sub">${fmtBytes(d.usedBytes)} used · ${d.users.length ? esc(d.users.join(", ")) : "no user folders found"}</div></div>
+      ${pickedDrive === d.root ? '<span class="pill ok">Selected</span>' : ""}
+    </div>`).join("")
+    : `<p class="muted" style="padding:6px 0">No drives with Windows on them yet. Plug the old PC's drive in, wait a few seconds, then press <b>Look again</b>.</p>`;
+  $("driveRows").querySelectorAll(".pc-row").forEach(el => el.addEventListener("click", () => { pickedDrive = el.dataset.root; renderDrives(); $("pulledNext").disabled = false; }));
+  $("driveRows").querySelectorAll("[data-unlock]").forEach(b => b.addEventListener("click", async () => {
+    const key = $("driveRows").querySelector(`[data-key="${CSS.escape(b.dataset.unlock)}"]`).value;
+    b.disabled = true; b.textContent = "Unlocking…";
+    try { await call("unlockDrive", { root: b.dataset.unlock, key }); toast("Unlocked"); await findDrives(); }
+    catch (e) { toast(e.message); b.disabled = false; b.textContent = "Unlock"; }
+  }));
+}
+$("pulledNext").addEventListener("click", async () => {
+  const b = $("pulledNext"); b.disabled = true; $("driveNote").textContent = "Reading the drive…";
+  try {
+    const r = await call("useDrive", { root: pickedDrive });
+    state.pulled = r;
+    state.info = { ...r, computerName: r.computerName };
+    state.sizes = {}; appPlans = null;
+    $("pcLabel").textContent = "Copying from"; $("pcName").textContent = `${r.computerName} (${r.root})`;
+    $("pulledSub").textContent = `${r.computerName} · ${r.os} · ${r.users.length} ${r.users.length === 1 ? "person" : "people"}, ${r.appCount} programs`;
+    show("pulled-method");
+  } catch (e) { toast(e.message); }
+  $("driveNote").textContent = ""; b.disabled = false;
+});
+function leaveDrive() {
+  state.pulled = null; state.info = state.here; state.sizes = {}; appPlans = null;
+  $("pcLabel").textContent = "This PC"; $("pcName").textContent = state.here.computerName;
+  call("useThisPc").catch(() => {});
+}
+$("goHere").addEventListener("click", () => { state.flow = "here"; show("old-what"); });
 
 // ----- old PC: find the new PC -----
 function startDiscovery() {
@@ -639,7 +781,7 @@ $("pickSave").addEventListener("click", async () => {
   $("driveNext").disabled = false;
 });
 $("driveNext").addEventListener("click", () => { state.flow = "capture"; show("old-what"); });
-$("whatBack").addEventListener("click", () => show(state.flow === "send" ? "old-find" : "old-drive"));
+$("whatBack").addEventListener("click", () => show(state.flow === "send" ? "old-find" : state.flow === "here" ? "pulled-method" : "old-drive"));
 
 // ----- old PC: choose people -----
 const METHOD_LABEL = { Reinstall: "Reinstall + settings", Copy: "Copy as is", Manual: "Do by hand" };
@@ -674,9 +816,13 @@ function selectedApps() { return [...$("appRows").querySelectorAll("input:checke
 
 function loadSizes() {
   loadApps();
-  $("whatSub").textContent = state.flow === "send"
-    ? `Sending to ${state.target.name}. Everyone is selected; untick anyone you want to leave behind.`
-    : `Saving to ${state.folder}. Everyone is selected; untick anyone you want to leave behind.`;
+  $("whatSub").textContent = (state.flow === "send" ? `Sending to ${state.target.name}.`
+    : state.flow === "here" ? `From ${state.pulled.computerName}'s drive onto this PC.`
+    : `Saving to ${state.folder}.`) + " Everyone is selected; untick anyone you want to leave behind.";
+  // A pulled drive has no running Windows: nothing is open, and Wi-Fi passwords are locked to the old PC.
+  $("shadowRow").style.display = state.pulled ? "none" : "";
+  $("wifiLabel").textContent = state.pulled ? "Wi-Fi networks" : "Wi-Fi networks and passwords";
+  $("wifiSub").textContent = state.pulled ? "Passwords can't be read off a drive, so each network asks for it once" : "So the new PC connects on its own";
   $("userRows").innerHTML = state.info.users.map(u => `
     <label class="row" style="cursor:pointer">
       <input type="checkbox" class="check" data-user="${esc(u.name)}" checked>
@@ -709,8 +855,18 @@ $("startCapture").addEventListener("click", async () => {
     users, apps: selectedApps(), wifi: $("optWifi").checked, settings: $("optSettings").checked, shadow: $("optShadow").checked,
     estimatedBytes: users.reduce((a, u) => a + (state.sizes[u] ? state.sizes[u].bytes : 0), 0),
   };
-  startProgress(state.flow === "send" ? `Sending to ${state.target.name}` : "Saving to your drive", args.estimatedBytes);
+  startProgress(state.flow === "send" ? `Sending to ${state.target.name}` : state.flow === "here" ? `Reading ${state.pulled.computerName}'s drive` : "Saving to your drive", args.estimatedBytes);
   try {
+    if (state.flow === "here") {
+      // Read the drive into a holding folder on this PC, then put it in place like any other copy.
+      // Files are moved (not copied again) out of that folder, so they don't take the space twice.
+      const r = await call("captureHere", args);
+      state.folder = r.folder; state.move = true;
+      if (r.warnings.length) toast(`${r.warnings.length} ${r.warnings.length === 1 ? "item" : "items"} couldn't be read off the drive. They're listed at the end.`);
+      state.captureWarnings = r.warnings;
+      $("pcLabel").textContent = "This PC"; $("pcName").textContent = state.here.computerName;
+      return openStore(r.folder);
+    }
     const r = state.flow === "send"
       ? await call("send", { ...args, address: state.target.address, port: state.target.port, code: state.code })
       : await call("capture", { ...args, folder: state.folder });
@@ -735,7 +891,7 @@ $("goReceive").addEventListener("click", async () => {
 });
 $("receiveBack").addEventListener("click", () => { call("cancel"); show("new-method"); });
 on("senderConnected", m => startProgress(`Receiving from ${m.name}`, m.estimatedBytes));
-on("received", async m => { state.folder = m.folder; await openStore(m.folder); });
+on("received", async m => { state.folder = m.folder; state.move = false; await openStore(m.folder); });
 on("failed", m => {
   // Pressing Back while waiting cancels the receive; that is not an error worth a screen.
   if (/cancel/i.test(m.message) && !document.getElementById("s-progress").classList.contains("active")) return;
@@ -752,7 +908,7 @@ $("pickLoad").addEventListener("click", async () => {
   hint.textContent = "Found a copy from " + r.fromComputer; hint.className = "hint";
   state.folder = r.path; $("loadNext").disabled = false;
 });
-$("loadNext").addEventListener("click", () => openStore(state.folder));
+$("loadNext").addEventListener("click", () => { state.move = false; openStore(state.folder); });
 
 async function openStore(folder) {
   try {
@@ -784,7 +940,8 @@ $("startApply").addEventListener("click", async () => {
   startProgress("Putting everything in place", state.store.bytes);
   try {
     const apps = [...$("reviewApps").querySelectorAll("input:checked")].map(c => c.dataset.app);
-    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value });
+    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value, move: state.move });
+    if (state.captureWarnings) { r.warnings = [...state.captureWarnings, ...r.warnings]; state.captureWarnings = null; }
     showDone({
       title: "Welcome to your new PC",
       sub: "Sign out and back in to see your wallpaper and mapped drives.",
@@ -892,10 +1049,19 @@ const Mock = {
         emit("userMeasured", { name: "tylor", files: 48211, bytes: 61.4e9 }, 700);
         emit("userMeasured", { name: "Sam", files: 9120, bytes: 8.2e9 }, 1100);
         emit("userMeasured", { name: "guest", files: 41, bytes: 3.1e6 }, 400);
+        emit("userMeasured", { name: "Admin", files: 310, bytes: 0.4e9 }, 500);
         return reply(null);
       case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, fromComputer: "TYLOR-DESKTOP" });
       case "startReceive": return reply({ code: "482913", addresses: ["192.168.1.42"] });
       case "planApps": return reply(MOCK_APPS, 1600);
+      case "checkUpdate": return reply({ version: "0.1.0.61", notes: "", page: "https://github.com/tylorfaber-arch/pc-migrate/releases/latest", sizeBytes: 70e6 }, 800);
+      case "listDrives": return reply([
+        { root: "E:\\", label: "Windows", locked: false, computerName: "SAM-OLD-LAPTOP", usedBytes: 212e9, totalBytes: 476e9, users: ["Sam", "Admin"] },
+        { root: "F:\\", locked: true, users: [] }], 900);
+      case "unlockDrive": return reply({ ok: true }, 800);
+      case "useDrive": return reply({ root: args.root, computerName: "SAM-OLD-LAPTOP", os: "Windows 11 Pro 23H2 (build 22631)", appCount: 64,
+        users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
+      case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
       case "readStore": return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
       case "capture": case "send": case "apply": {
         const total = args.estimatedBytes || 69.6e9; let b = 0, f = 0;

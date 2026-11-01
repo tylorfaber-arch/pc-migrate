@@ -1,5 +1,6 @@
 using PcMigrate.Core.Apps;
 using PcMigrate.Core.Models;
+using PcMigrate.Core.Offline;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Windows;
 
@@ -24,7 +25,8 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
 
     public async Task<Manifest> RunAsync(IMigrationSink sink, CaptureOptions options, CancellationToken ct = default)
     {
-        log.Info("Scanning this PC...");
+        var offline = probe.Offline;
+        log.Info(offline is null ? "Scanning this PC..." : $"Reading the drive at {offline.Root}...");
         var inventory = probe.GetInventory();
         var users = SelectUsers(inventory, options);
         var manifest = new Manifest { Inventory = inventory };
@@ -40,7 +42,9 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         try
         {
             Func<string, string> mapPath = p => p;
-            if (options.UseShadowCopy && OperatingSystem.IsWindows())
+            // A pulled drive has no running Windows holding files open, so it needs no snapshot.
+            if (offline is not null) mapPath = offline.ToReadable;
+            else if (options.UseShadowCopy && OperatingSystem.IsWindows())
             {
                 var volumes = users.Select(u => u.ProfilePath)
                     .Concat(options.Apps.Where(a => a.Method == AppMethod.Copy && a.InstallLocation is not null).Select(a => a.InstallLocation!))
@@ -106,7 +110,9 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
 
             if (options.IncludeUserSettings && OperatingSystem.IsWindows())
                 await CaptureUserSettingsAsync(users, sink, manifest, Warn, ct);
-            if (options.IncludeWifi && OperatingSystem.IsWindows())
+            if (options.IncludeWifi && offline is not null)
+                await CaptureOfflineWifiAsync(offline, AddFile, manifest, Warn);
+            else if (options.IncludeWifi && OperatingSystem.IsWindows())
                 await CaptureWifiAsync(sink, manifest, Warn, ct);
 
             log.Info($"Captured {files:N0} files ({FormatBytes(bytes)}). Writing manifest...");
@@ -164,7 +170,7 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
     {
         foreach (var user in users)
         {
-            var captured = UserSettingsIO.Read(user, log);
+            var captured = UserSettingsIO.Read(user, log, probe.Offline);
             if (captured is null) continue;
 
             if (captured.WallpaperSourcePath is { } wallpaper)
@@ -213,13 +219,54 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         }
     }
 
+    /// <summary>
+    /// Saved networks from a pulled drive, without their passwords (only the old PC
+    /// could decrypt those). The new PC adds them and asks for each password once.
+    /// </summary>
+    private async Task CaptureOfflineWifiAsync(OfflinePaths offline, Func<string, string, DateTime, Task<bool>> addFile, Manifest manifest, Action<string> warn)
+    {
+        var folder = OfflineWifi.ProfilesFolder(offline);
+        if (!Directory.Exists(folder)) return;
+        log.Info("Reading saved Wi-Fi networks...");
+        var temp = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "pcmigrate-wifi-" + Guid.NewGuid().ToString("N"))).FullName;
+        var names = new List<string>();
+        try
+        {
+            var n = 0;
+            foreach (var xml in Directory.EnumerateFiles(folder, "*.xml", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var (content, name) = OfflineWifi.RemovePassword(await File.ReadAllTextAsync(xml));
+                    var file = Path.Combine(temp, $"{++n}.xml");
+                    await File.WriteAllTextAsync(file, content);
+                    var storePath = StorePath.Combine(StorePath.SettingsRoot, "wifi", $"{n}.xml");
+                    if (!await addFile(file, storePath, DateTime.UtcNow)) continue;
+                    manifest.WifiProfiles.Add(storePath);
+                    if (name is not null) names.Add(name);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+                {
+                    warn($"Couldn't read Wi-Fi network {Path.GetFileName(xml)}: {ex.Message}");
+                }
+            }
+            if (names.Count > 0)
+                warn($"Wi-Fi passwords can't be read from a pulled drive. These networks will ask for their password once on the new PC: {string.Join(", ", names.Distinct())}");
+        }
+        finally
+        {
+            try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
+        }
+    }
+
     /// <summary>How many files and bytes a capture of this user would copy.</summary>
-    public static (long Files, long Bytes) Estimate(UserProfileInfo user, CaptureRules rules, CancellationToken ct = default)
+    public static (long Files, long Bytes) Estimate(UserProfileInfo user, CaptureRules rules, CancellationToken ct = default, OfflinePaths? offline = null)
     {
         long files = 0, bytes = 0;
         foreach (var folder in rules.ProfileFolders)
         {
             var path = Path.Combine(user.ProfilePath, folder.Replace('/', Path.DirectorySeparatorChar));
+            if (offline is not null) path = offline.ToReadable(path);
             foreach (var f in FileCollector.Enumerate(path, folder, rules, _ => { }))
             {
                 ct.ThrowIfCancellationRequested();
