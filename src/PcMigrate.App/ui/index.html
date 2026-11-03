@@ -139,6 +139,16 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .tools .btn svg { width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; }
 .key-row .key { font-family: ui-monospace, Consolas, monospace; font-size: 14px; letter-spacing: .02em; user-select: all; }
 .row.key-row .sub { white-space: normal; }
+.health { display: flex; gap: 14px; align-items: flex-start; border-radius: 12px; padding: 14px 16px; margin: 0 0 16px; }
+.health.Failing { background: #fde8e8; }
+.health.Warning { background: var(--warn-soft); }
+.health b { display: block; margin-bottom: 2px; }
+.health ul { margin: 6px 0 0 18px; padding: 0; color: var(--muted); font-size: 13px; }
+.pill.Good { background: var(--ok-soft); color: var(--ok); }
+.pill.Warning { background: var(--warn-soft); color: var(--warn); }
+.pill.Failing { background: #fde8e8; color: var(--bad); }
+.pill.Unknown { background: var(--surface-2); color: var(--muted); }
+.row.health-row .sub { white-space: normal; }
 .disk-row .pill:not(.ok) { background: var(--surface-2); color: var(--muted); }
 .disk-row.off { opacity: .45; cursor: not-allowed; }
 .disk-row.off:hover { background: transparent; border-color: transparent; }
@@ -332,6 +342,7 @@ footer .grow { flex: 1; }
     <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
     <symbol id="i-clone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="8" height="12" rx="1.5"/><rect x="13.5" y="6" width="8" height="12" rx="1.5"/><path d="M5 14.5h3M16 14.5h3"/><path d="M9.5 3.5h5m0 0-1.5-1.5m1.5 1.5L13 5"/></symbol>
     <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-5 4 10 2-5h6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></symbol>
@@ -384,6 +395,7 @@ footer .grow { flex: 1; }
     </div>
     <div class="tools"><span class="label">Tools</span>
       <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys</button>
+      <button class="btn ghost" data-go="health"><svg><use href="#i-pulse"/></svg>Drive health</button>
     </div>
   </section>
 
@@ -422,6 +434,7 @@ footer .grow { flex: 1; }
   <section class="screen" id="s-pulled-method">
     <button class="back" data-go="pulled"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
     <div class="title"><h1>Where should it go?</h1><p id="pulledSub"></p></div>
+    <div id="pulledHealth"></div>
     <div class="choices three">
       <button class="choice" id="goHere">
         <span class="tag">Easiest</span>
@@ -443,6 +456,18 @@ footer .grow { flex: 1; }
     <div class="tools"><span class="label">Tools</span>
       <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys on this drive</button>
     </div>
+  </section>
+
+  <!-- DRIVE HEALTH -->
+  <section class="screen" id="s-health">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Drive health</h1><p>What each drive reports about itself. Check a drive before rescuing files from it or cloning it.</p></div>
+    <div class="card">
+      <div class="card-head"><h2>Drives</h2><span class="spacer"></span><button class="btn ghost" id="refreshHealth">Look again</button></div>
+      <div class="rows" id="healthRows"></div>
+      <div id="healthLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Asking the drives…</div>
+    </div>
+    <p class="hint">Many USB adapters and enclosures don't pass a drive's health through; those show as unknown. Connecting the drive with a different adapter, or inside a PC, usually works.</p>
   </section>
 
   <!-- LICENSE KEYS -->
@@ -707,7 +732,7 @@ function fmtTime(s) {
 function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
 
 const state = { info: null, here: null, pulled: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [], move: false };
-const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
   // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
@@ -716,6 +741,7 @@ function show(name) {
   if (name === "pulled") findDrives();
   if (name === "clone") findDisks();
   if (name === "keys") findKeys();
+  if (name === "health") findHealth();
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
   $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
@@ -795,10 +821,33 @@ $("pulledNext").addEventListener("click", async () => {
     state.sizes = {}; appPlans = null;
     $("pcLabel").textContent = "Copying from"; $("pcName").textContent = `${r.computerName} (${r.root})`;
     $("pulledSub").textContent = `${r.computerName} · ${r.os} · ${r.users.length} ${r.users.length === 1 ? "person" : "people"}, ${r.appCount} programs`;
+    $("pulledHealth").innerHTML = healthBanner(r.health);
     show("pulled-method");
   } catch (e) { toast(e.message); }
   $("driveNote").textContent = ""; b.disabled = false;
 });
+// ----- drive health -----
+const LEVEL = { Good: "Healthy", Warning: "Warning", Failing: "Failing", Unknown: "Unknown" };
+function healthBanner(h) {
+  if (!h || (h.level !== "Failing" && h.level !== "Warning")) return "";
+  return `<div class="health ${h.level}"><div class="res-icon bad"><svg><use href="#i-pulse"/></svg></div>
+    <div><b>${esc(h.summary)}</b>${h.level === "Failing" ? "Start the copy now (Desktop and Documents go first). Don't run disk checks or repairs on it first; they can finish it off." : "It still works, but don't put off copying from it."}
+    <ul>${h.details.map(d => `<li>${esc(d)}</li>`).join("")}</ul></div></div>`;
+}
+async function findHealth() {
+  $("healthRows").innerHTML = ""; $("healthLooking").style.display = "flex";
+  let list = [];
+  try { list = await call("driveHealth"); } catch (e) { toast(e.message); }
+  $("healthLooking").style.display = "none";
+  $("healthRows").innerHTML = list.length ? list.map(h => `<div class="row health-row">
+      <div class="avatar" style="border-radius:10px"><svg width="20" height="20"><use href="#i-hdd"/></svg></div>
+      <div class="grow"><div class="name">${esc(h.model)} <span class="faint" style="font-weight:400">(disk ${h.disk})</span></div>
+        <div class="sub">${esc(h.summary)}${h.details.length ? " " + h.details.map(esc).join(" · ") : ""}</div></div>
+      <span class="pill ${h.level}">${LEVEL[h.level]}</span>
+    </div>`).join("") : `<p class="muted" style="padding:6px 0">No drives found.</p>`;
+}
+$("refreshHealth").addEventListener("click", findHealth);
+
 // ----- license keys -----
 let keys = [];
 async function findKeys() {
@@ -866,7 +915,7 @@ function renderPlan(p) {
   $("cpFrom").textContent = p.source.model; $("cpFromSub").textContent = fmtBytes(p.source.size);
   $("cpTo").textContent = p.target.model; $("cpToSub").textContent = fmtBytes(p.target.size) + (p.target.serial ? " · serial " + p.target.serial : "");
   $("clonePlanSub").textContent = p.canRun ? `About ${fmtBytes(p.bytesToCopy)} to copy. Empty space is skipped, so it's quicker than the drive size suggests.` : "This pair of drives needs a change first.";
-  $("cpProblem").innerHTML = p.problem ? `<div class="problem"><div class="grow">${esc(p.problem)}</div>${p.shrinkBy > 0 && p.shrinkLetter ? `<button class="btn ghost" id="shrinkBtn">Shrink ${esc(p.shrinkLetter)}: now</button>` : ""}</div>` : "";
+  $("cpProblem").innerHTML = healthBanner(p.sourceHealth).replace('class="health', 'style="margin:14px 0 0" class="health') + (p.problem ? `<div class="problem"><div class="grow">${esc(p.problem)}</div>${p.shrinkBy > 0 && p.shrinkLetter ? `<button class="btn ghost" id="shrinkBtn">Shrink ${esc(p.shrinkLetter)}: now</button>` : ""}</div>` : "");
   $("cpPartsCard").style.display = p.canRun ? "" : "none";
   $("cpParts").innerHTML = p.partitions.map(x => `<div class="row part-row"><div class="grow"><div class="name" style="font-weight:500">${esc(x.label)}</div></div>
       <div class="size">${fmtBytes(x.from)}${x.to !== x.from ? ` → <b style="color:var(--${x.grows ? "ok" : "warn"})">${fmtBytes(x.to)}</b>` : ""}</div></div>`).join("");
@@ -1245,6 +1294,10 @@ const Mock = {
         { root: "E:\\", label: "Windows", locked: false, computerName: "SAM-OLD-LAPTOP", usedBytes: 212e9, totalBytes: 476e9, users: ["Sam", "Admin"] },
         { root: "F:\\", locked: true, users: [] }], 900);
       case "unlockDrive": return reply({ ok: true }, 800);
+      case "driveHealth": return reply([
+        { disk: 0, model: "Samsung SSD 980 500GB", level: "Good", summary: "No problems reported.", details: ["41 °C", "6% of rated life used", "8,812 hours powered on (about 1 years)"] },
+        { disk: 1, model: "WDC WD10SPZX-22Z10T1", level: "Failing", summary: "This drive is failing. Copy what matters first and don't run anything else on it.", details: ["The drive's own self-test predicts it will fail soon.", "214 read error(s) the drive couldn't correct: some data may already be unreadable.", "31,240 hours powered on (about 3.6 years)"] },
+        { disk: 2, model: "JMicron Generic USB 3.0", level: "Unknown", summary: "The drive's health can't be read, usually because the USB adapter doesn't pass it through.", details: [] }], 900);
       case "licenseKeys": return reply([
         { product: "Windows 11 Pro", key: "VK7JG-NPHTM-C97JM-9MPGT-3V66T", note: "Generic install key: Windows was activated by a digital licence tied to the old PC's hardware (or a key in its firmware), not by this key." },
         { product: "Windows (built into this PC)", key: "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX", note: "Stored in this PC's firmware by its maker. It only activates Windows on this PC." },
@@ -1265,6 +1318,7 @@ const Mock = {
           partitions: [{ label: "Boot (EFI)", from: 100e6, to: 100e6 }, { label: "Reserved", from: 16e6, to: 16e6 }, { label: "C: NTFS", from: 498e9, to: 1.99e12, grows: true }, { label: "Recovery", from: 750e6, to: 750e6 }] }, cmd === "shrinkSource" ? 1500 : 500);
       }
       case "useDrive": return reply({ root: args.root, computerName: "SAM-OLD-LAPTOP", os: "Windows 11 Pro 23H2 (build 22631)", appCount: 64,
+        health: { disk: 1, model: "WDC WD10SPZX-22Z10T1", level: "Failing", summary: "This drive is failing. Copy what matters first and don't run anything else on it.", details: ["The drive's own self-test predicts it will fail soon.", "214 read error(s) the drive couldn't correct: some data may already be unreadable."] },
         users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
       case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
       case "readStore": return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });

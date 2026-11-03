@@ -88,6 +88,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "openPath" => OpenPath(Str(args, "path")),
         "licenseKeys" => await Task.Run(() => SourceProbe.LicenseKeys().Select(k => (object)new { product = k.Product, key = k.Key, note = k.Note }).ToList()),
         "saveKeys" => await Task.Run(SaveKeys),
+        "driveHealth" => await Task.Run(() => HealthReader.All().Select(HealthView).ToList()),
         "close" => CloseWindow(),
         _ => throw new InvalidOperationException($"Unknown command {cmd}"),
     };
@@ -131,6 +132,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             source = new { number = source.Number, model = source.Model, size = source.Size },
             target = new { number = target.Number, model = target.Model, size = target.Size, serial = target.Serial },
             partitions = plan.Partitions.Select(p => new { label = Label(p.Source), from = p.Source.Length, to = p.Length, grows = p.Grows }),
+            sourceHealth = HealthReader.All().FirstOrDefault(h => h.DiskNumber == source.Number) is { } h ? HealthView(h) : null,
         });
     }
 
@@ -238,6 +240,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             computerName = drive.ComputerName,
             os = drive.OsDescription,
             appCount = _pulledInventory.Apps.Count,
+            health = await Task.Run(() => HealthReader.ForLetter(root) is { } h ? HealthView(h) : null),
             users = _pulledInventory.Users.Select(u => new { name = u.UserName, path = drive.Paths.ToReadable(u.ProfilePath) }),
         };
     }
@@ -534,6 +537,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         _work?.Cancel();
         return null;
     }
+
+    private static object HealthView(PcMigrate.Core.Health.DriveHealthReport h) =>
+        new { disk = h.DiskNumber, model = h.Model, level = h.Level.ToString(), summary = h.Summary, details = h.Details };
 
     /// <summary>Writes the keys to a text file on the desktop and opens it.</summary>
     private object SaveKeys()

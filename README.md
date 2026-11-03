@@ -82,6 +82,12 @@ Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
 
+**Drive health.** **Tools → Drive health** (or `pcmigrate-cli health`) shows what each drive reports
+about itself: Windows' verdict and the SMART counters (predicted failure, uncorrectable read errors,
+SSD wear, temperature, hours powered on). A pulled drive is checked as soon as it's picked, and a
+failing one gets a red banner: start the copy straight away and don't run disk repairs on it first.
+The source of a clone is checked too. Many USB adapters don't pass health through; those show as unknown.
+
 `pcmigrate-cli scan` lists users, sizes and programs. `--dry-run` on apply changes nothing. Use
 `--map olduser=newuser` when account names differ. `pcmigrate-cli help` lists everything.
 
@@ -216,6 +222,7 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 4. Rescue a dead PC's drive over USB ← done
 5. Full disk clone, drive to drive (including external to external) ← done, needs testing on real drives
 6. License key finder ← done
-7. Drive health check, encrypted backups, disk images, rescue USB, scheduled backups, technician mode
-8. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
-9. Licensing, installer and a place to sell it
+7. Drive health check ← done
+8. Encrypted backups, disk images, rescue USB, scheduled backups, technician mode
+9. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
+10. Licensing, installer and a place to sell it

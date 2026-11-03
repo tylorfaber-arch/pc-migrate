@@ -40,6 +40,7 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         }
 
         log.Info($"Found {inventory.Users.Count} user(s) and {inventory.Apps.Count} program(s). Capturing: {string.Join(", ", users.Select(u => u.UserName))}");
+        if (offline is not null && OperatingSystem.IsWindows()) CheckDriveHealth(offline.Root, Warn);
 
         var snapshots = new Dictionary<string, IDisposable>(StringComparer.OrdinalIgnoreCase);
         try
@@ -295,6 +296,19 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         {
             try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
         }
+    }
+
+    /// <summary>A pulled drive is often pulled because it's dying: say so up front, in the log and the warnings.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private void CheckDriveHealth(string root, Action<string> warn)
+    {
+        Health.DriveHealthReport? health = null;
+        try { health = HealthReader.ForLetter(root); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Management.ManagementException) { }
+        if (health is null) return;
+        var line = $"Drive health ({health.Model}): {health.Summary}" + (health.Details.Count > 0 ? " " + string.Join(" ", health.Details.Select(d => d.TrimEnd('.') + ".")) : "");
+        if (health.Level is Health.HealthLevel.Failing or Health.HealthLevel.Warning) warn(line);
+        else log.Info(line);
     }
 
     private async Task CaptureLicenseKeysAsync(IMigrationSink sink, Manifest manifest, Func<string, string, DateTime, Task<bool>> addFile, Action<string> warn)
