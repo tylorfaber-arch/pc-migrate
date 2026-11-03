@@ -134,6 +134,11 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .choice.wide { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 18px; padding: 18px 24px; }
 .choice.wide .icon { margin-bottom: 0; flex: none; }
 .choice.wide p { margin-top: 2px; }
+.tools { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; align-items: center; }
+.tools .label { color: var(--faint); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; margin-right: 4px; }
+.tools .btn svg { width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; }
+.key-row .key { font-family: ui-monospace, Consolas, monospace; font-size: 14px; letter-spacing: .02em; user-select: all; }
+.row.key-row .sub { white-space: normal; }
 .disk-row .pill:not(.ok) { background: var(--surface-2); color: var(--muted); }
 .disk-row.off { opacity: .45; cursor: not-allowed; }
 .disk-row.off:hover { background: transparent; border-color: transparent; }
@@ -326,6 +331,7 @@ footer .grow { flex: 1; }
     <symbol id="i-hdd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="10" r="4"/><circle cx="12" cy="10" r=".8" fill="currentColor"/><path d="M12 10l3.5 7M8 18h1"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
     <symbol id="i-clone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="8" height="12" rx="1.5"/><rect x="13.5" y="6" width="8" height="12" rx="1.5"/><path d="M5 14.5h3M16 14.5h3"/><path d="M9.5 3.5h5m0 0-1.5-1.5m1.5 1.5L13 5"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></symbol>
@@ -375,6 +381,9 @@ footer .grow { flex: 1; }
         <div><h2>Clone a whole drive</h2>
         <p>Make an exact copy of one drive onto another, ready to start up. Works with this PC's drive or two USB drives.</p></div>
       </button>
+    </div>
+    <div class="tools"><span class="label">Tools</span>
+      <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys</button>
     </div>
   </section>
 
@@ -431,6 +440,21 @@ footer .grow { flex: 1; }
         <p>Save it to another drive to take to the new PC.</p>
       </button>
     </div>
+    <div class="tools"><span class="label">Tools</span>
+      <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys on this drive</button>
+    </div>
+  </section>
+
+  <!-- LICENSE KEYS -->
+  <section class="screen" id="s-keys">
+    <button class="back" id="keysBack"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>License keys</h1><p id="keysSub">Product keys for Windows, Office and other programs, read from this PC. They're also saved with every backup.</p></div>
+    <div class="card">
+      <div class="rows" id="keyRows"></div>
+      <div id="keysLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for keys…</div>
+    </div>
+    <p class="hint">Many programs today are licensed through an account instead of a key (Microsoft 365, Adobe Creative Cloud, most antivirus). Those won't show here; sign in to them again on the new PC.</p>
+    <div class="actions"><span class="spacer"></span><button class="btn ghost" id="copyKeys" disabled>Copy all</button><button class="btn" id="saveKeys" disabled>Save to a text file</button></div>
   </section>
 
   <!-- CLONE: PICK DRIVES -->
@@ -683,7 +707,7 @@ function fmtTime(s) {
 function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
 
 const state = { info: null, here: null, pulled: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [], move: false };
-const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
   // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
@@ -691,6 +715,7 @@ function show(name) {
   if (name === "home" && state.pulled) leaveDrive();
   if (name === "pulled") findDrives();
   if (name === "clone") findDisks();
+  if (name === "keys") findKeys();
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
   $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
@@ -774,6 +799,30 @@ $("pulledNext").addEventListener("click", async () => {
   } catch (e) { toast(e.message); }
   $("driveNote").textContent = ""; b.disabled = false;
 });
+// ----- license keys -----
+let keys = [];
+async function findKeys() {
+  $("keysSub").textContent = state.pulled
+    ? `Product keys for Windows, Office and other programs, read from ${state.pulled.computerName}'s drive. They're also saved with every backup.`
+    : "Product keys for Windows, Office and other programs, read from this PC. They're also saved with every backup.";
+  $("keyRows").innerHTML = ""; $("keysLooking").style.display = "flex"; $("copyKeys").disabled = $("saveKeys").disabled = true;
+  try { keys = await call("licenseKeys"); } catch (e) { keys = []; toast(e.message); }
+  $("keysLooking").style.display = "none";
+  $("keyRows").innerHTML = keys.length ? keys.map(k => `<div class="row key-row">
+      <div class="avatar" style="border-radius:10px"><svg width="18" height="18"><use href="#i-key"/></svg></div>
+      <div class="grow"><div class="name">${esc(k.product)}</div><div class="key">${esc(k.key)}</div>${k.note ? `<div class="sub">${esc(k.note)}</div>` : ""}</div>
+    </div>`).join("") : `<p class="muted" style="padding:6px 0">No keys found.</p>`;
+  $("copyKeys").disabled = $("saveKeys").disabled = !keys.length;
+}
+$("keysBack").addEventListener("click", () => show(state.pulled ? "pulled-method" : "home"));
+$("copyKeys").addEventListener("click", async () => {
+  const text = keys.map(k => `${k.product}\n  ${k.key}${k.note ? "\n  " + k.note : ""}`).join("\n\n");
+  try { await navigator.clipboard.writeText(text); toast("Copied"); } catch { toast("Couldn't copy; use Save instead."); }
+});
+$("saveKeys").addEventListener("click", async () => {
+  try { const r = await call("saveKeys"); toast("Saved to " + r.path); } catch (e) { toast(e.message); }
+});
+
 // ----- clone a whole drive -----
 let disks = [], cloneFrom = null, cloneTo = null, clonePlan = null;
 async function findDisks() {
@@ -1196,6 +1245,13 @@ const Mock = {
         { root: "E:\\", label: "Windows", locked: false, computerName: "SAM-OLD-LAPTOP", usedBytes: 212e9, totalBytes: 476e9, users: ["Sam", "Admin"] },
         { root: "F:\\", locked: true, users: [] }], 900);
       case "unlockDrive": return reply({ ok: true }, 800);
+      case "licenseKeys": return reply([
+        { product: "Windows 11 Pro", key: "VK7JG-NPHTM-C97JM-9MPGT-3V66T", note: "Generic install key: Windows was activated by a digital licence tied to the old PC's hardware (or a key in its firmware), not by this key." },
+        { product: "Windows (built into this PC)", key: "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX", note: "Stored in this PC's firmware by its maker. It only activates Windows on this PC." },
+        { product: "Microsoft Office Professional Plus 2016", key: "B9GN2-DXXQC-9DHKT-GGWCR-4X6XK", note: null },
+        { product: "Microsoft Office (O365ProPlusRetail)", key: "(none on the PC)", note: "This Office is licensed through a Microsoft account or the company's Microsoft 365. Sign in to it on the new PC." },
+        { product: "Adobe Acrobat 2020", key: "1118-1234-5678-9012-3456-7890", note: null }], 900);
+      case "saveKeys": return reply({ path: "C:\\Users\\tylor\\Desktop\\license-keys-TYLOR-DESKTOP.txt" });
       case "listDisks": return reply([
         { number: 0, model: "Samsung SSD 980 500GB", serial: "S64DNX0R", size: 500e9, bus: "NVMe", isSystem: true, used: 212e9, letters: ["C:"], hasWindows: true },
         { number: 1, model: "Crucial MX500 2TB", serial: "2204E6", size: 2e12, bus: "USB", isSystem: false, used: 0, letters: [], hasWindows: false },

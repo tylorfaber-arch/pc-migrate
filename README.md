@@ -78,6 +78,10 @@ From a dead PC's drive: `pcmigrate-cli drives` lists plugged-in drives with Wind
 Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
 `pcmigrate-cli clone --from 0 --to 2`. Add `--shrink-source` to let it shrink the source first when needed.
 
+`pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
+the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
+is shown too, but it only activates Windows on that PC.
+
 `pcmigrate-cli scan` lists users, sizes and programs. `--dry-run` on apply changes nothing. Use
 `--map olduser=newuser` when account names differ. `pcmigrate-cli help` lists everything.
 
@@ -92,6 +96,7 @@ Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
 | Outlook signatures, Office templates, Start menu shortcuts, pinned taskbar items, themes | |
 | Wallpaper | |
 | Mapped network drives | Reconnect at next sign-in |
+| License keys | Windows, older Office (2007 to 2016 bought with a key) and programs that store a key or serial number in the registry. Saved as `license-keys.txt` at the top of the backup and listed in the new PC's report. Account-based licences (Microsoft 365, Creative Cloud) have no key to find. |
 | Saved Wi-Fi networks, with passwords | From a pulled drive the networks move but not their passwords (Windows encrypts them with the old PC's own key), so each asks once. |
 | **Programs** | See *How programs move* below |
 
@@ -210,5 +215,7 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 3. Step-by-step app window ← done early; code signing still to do
 4. Rescue a dead PC's drive over USB ← done
 5. Full disk clone, drive to drive (including external to external) ← done, needs testing on real drives
-6. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
-7. Licensing, installer and a place to sell it
+6. License key finder ← done
+7. Drive health check, encrypted backups, disk images, rescue USB, scheduled backups, technician mode
+8. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
+9. Licensing, installer and a place to sell it

@@ -1,4 +1,5 @@
 using PcMigrate.Core.Apps;
+using PcMigrate.Core.Keys;
 using PcMigrate.Core.Models;
 using PcMigrate.Core.Offline;
 using PcMigrate.Core.Storage;
@@ -12,6 +13,8 @@ public sealed class CaptureOptions
     public IReadOnlyCollection<string>? Users { get; init; }
     public bool UseShadowCopy { get; init; } = true;
     public bool IncludeWifi { get; init; } = true;
+    /// <summary>Read Windows, Office and program license keys and save them with the backup.</summary>
+    public bool IncludeLicenseKeys { get; init; } = true;
     public bool IncludeUserSettings { get; init; } = true;
     public CaptureRules Rules { get; init; } = new();
     /// <summary>Programs to bring along, as planned by <see cref="AppPlanner"/>. Manual ones are only recorded.</summary>
@@ -142,6 +145,8 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
                 await CaptureOfflineWifiAsync(offline, AddFile, manifest, Warn);
             else if (options.IncludeWifi && OperatingSystem.IsWindows())
                 await CaptureWifiAsync(sink, manifest, Warn, ct);
+
+            if (options.IncludeLicenseKeys) await CaptureLicenseKeysAsync(sink, manifest, AddFile, Warn);
 
             foreach (var app in manifest.Apps.Where(a => a.Method == AppMethod.Manual))
                 log.Info($"To install by hand: {app.Name} ({app.Reason})");
@@ -289,6 +294,34 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         finally
         {
             try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    private async Task CaptureLicenseKeysAsync(IMigrationSink sink, Manifest manifest, Func<string, string, DateTime, Task<bool>> addFile, Action<string> warn)
+    {
+        log.Info("Looking for license keys...");
+        try
+        {
+            manifest.LicenseKeys.AddRange(probe.LicenseKeys());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            warn($"Couldn't read license keys: {ex.Message}");
+            return;
+        }
+        if (manifest.LicenseKeys.Count == 0) return;
+        log.Info($"Found {manifest.LicenseKeys.Count} license key(s).");
+
+        // Also a plain text file at the top of the backup, so the keys can be read without pc-migrate.
+        var temp = Path.Combine(Path.GetTempPath(), $"pcmigrate-keys-{Guid.NewGuid():N}.txt");
+        try
+        {
+            await File.WriteAllTextAsync(temp, LicenseKeyReport.Format(manifest.Inventory.Machine.ComputerName, manifest.LicenseKeys));
+            await addFile(temp, LicenseKeyReport.StorePath, DateTime.UtcNow);
+        }
+        finally
+        {
+            try { File.Delete(temp); } catch (IOException) { }
         }
     }
 

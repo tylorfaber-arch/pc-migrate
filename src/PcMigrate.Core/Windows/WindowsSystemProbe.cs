@@ -14,6 +14,8 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
 
     public string? CurrentUserSid => WindowsIdentity.GetCurrent().User?.Value;
 
+    public IReadOnlyList<Keys.LicenseKey> LicenseKeys() => KeyFinder.ForThisPc();
+
     public Inventory GetInventory()
     {
         var users = ReadProfiles();

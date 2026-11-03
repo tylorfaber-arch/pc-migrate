@@ -270,6 +270,13 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatf
                 sb.AppendLine($"  {app.Outcome,-16} {app.Name}{(app.Message is null ? "" : "  (" + app.Message + ")")}");
             sb.AppendLine();
         }
+        if (manifest.LicenseKeys.Count > 0)
+        {
+            sb.AppendLine($"License keys from the old PC ({manifest.LicenseKeys.Count}), also in {Keys.LicenseKeyReport.StorePath} in the backup:");
+            foreach (var k in manifest.LicenseKeys)
+                sb.AppendLine($"  {k.Product}: {k.Key}{(k.Note is null ? "" : "  (" + k.Note + ")")}");
+            sb.AppendLine();
+        }
         sb.AppendLine($"Programs on the old PC that are not installed here ({result.AppsToReinstall.Count}):");
         foreach (var app in result.AppsToReinstall)
             sb.AppendLine($"  - {app.Name}{(app.Version is null ? "" : " " + app.Version)}{(app.Publisher is null ? "" : "  [" + app.Publisher + "]")}");

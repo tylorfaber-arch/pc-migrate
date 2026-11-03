@@ -78,8 +78,8 @@ async Task<int> Run(string[] argv)
         // --from-drive E: reads a drive pulled from a dead PC instead of this PC's own Windows.
         if (cli.Get("from-drive") is { } driveArg)
         {
-            if (cli.Command is not ("scan" or "capture" or "send"))
-                return Fail("--from-drive works with scan, capture and send.");
+            if (cli.Command is not ("scan" or "capture" or "send" or "keys"))
+                return Fail("--from-drive works with scan, capture, send and keys.");
             var root = driveArg.TrimEnd('\\', '/', ':')[..1] + ":\\";
             if (cli.Get("recovery-key") is { } key && BitLocker.IsLocked(root))
             {
@@ -100,6 +100,7 @@ async Task<int> Run(string[] argv)
         return cli.Command switch
         {
             "drives" => Drives(),
+            "keys" => Keys(),
             "disks" => ListDisks(),
             "clone" => await CloneDisk(),
             "update" => await SelfUpdate(),
@@ -205,6 +206,25 @@ async Task<int> Run(string[] argv)
         Console.WriteLine();
         Updater.Swap(exePath, downloaded);
         return Done($"Updated to {update.Tag.TrimStart('v')}. Run pcmigrate-cli again to use it.", 0);
+    }
+
+    int Keys()
+    {
+        var keys = probe.LicenseKeys();
+        if (keys.Count == 0)
+        {
+            Console.WriteLine("No license keys found.");
+            return 0;
+        }
+        foreach (var k in keys)
+        {
+            Console.WriteLine(k.Product);
+            Console.WriteLine("  " + k.Key);
+            if (k.Note is not null) Console.WriteLine("  " + k.Note);
+        }
+        Console.WriteLine();
+        Console.WriteLine("Programs licensed through an account (Microsoft 365, Creative Cloud, most antivirus) have no key to show.");
+        return 0;
     }
 
     int Drives()
@@ -433,6 +453,7 @@ async Task<int> Run(string[] argv)
 
             Other commands:
               pcmigrate-cli scan [--json]  List users, how much would be copied, and installed programs.
+              pcmigrate-cli keys           Show Windows, Office and program license keys (add --from-drive E: for a dead PC's drive).
               pcmigrate-cli version
               pcmigrate-cli disks          List the physical disks and their partitions.
               pcmigrate-cli clone --from <n> --to <n> [--shrink-source] [--yes]

@@ -86,6 +86,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "apply" => await Apply(args),
         "cancel" => Cancel(),
         "openPath" => OpenPath(Str(args, "path")),
+        "licenseKeys" => await Task.Run(() => SourceProbe.LicenseKeys().Select(k => (object)new { product = k.Product, key = k.Key, note = k.Note }).ToList()),
+        "saveKeys" => await Task.Run(SaveKeys),
         "close" => CloseWindow(),
         _ => throw new InvalidOperationException($"Unknown command {cmd}"),
     };
@@ -531,6 +533,16 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
     {
         _work?.Cancel();
         return null;
+    }
+
+    /// <summary>Writes the keys to a text file on the desktop and opens it.</summary>
+    private object SaveKeys()
+    {
+        var name = SourceInventory?.Machine.ComputerName ?? Environment.MachineName;
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), $"license-keys-{name}.txt");
+        File.WriteAllText(path, PcMigrate.Core.Keys.LicenseKeyReport.Format(name, SourceProbe.LicenseKeys()));
+        OpenPath(path);
+        return new { path };
     }
 
     private static object? OpenPath(string path)
