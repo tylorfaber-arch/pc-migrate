@@ -78,6 +78,15 @@ From a dead PC's drive: `pcmigrate-cli drives` lists plugged-in drives with Wind
 Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
 `pcmigrate-cli clone --from 0 --to 2`. Add `--shrink-source` to let it shrink the source first when needed.
 
+**Drive images.** Instead of a second drive, a whole drive can be saved as one image file and put
+back later onto the same drive or a new one (it starts up on its own, and grows to fill a bigger
+drive). In the app: **Clone or image a whole drive → Drive to image file** and **Image file to drive**.
+On the command line: `pcmigrate-cli image --from 0 --to E:\images` and
+`pcmigrate-cli restore-image --from "E:\images\PC disk 0 2026-11-03.vhdx" --to 2`.
+Only the space in use is saved, so a 1 TB drive holding 200 GB makes a file of about 200 GB.
+The image is a normal Windows virtual disk (.vhdx): double-click it in File Explorer and it opens
+like a USB drive, so single files can be copied out of it without restoring anything.
+
 `pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
@@ -166,6 +175,10 @@ Licence keys and sign-ins don't move.
   sector); other partitions are copied whole. Afterwards the NTFS partition is extended, the clone's
   saved drive letters are cleared so it takes C: on its own, and `bcdboot` rewrites its boot files.
   The disks are checked again (size, model, serial) right before anything is erased.
+- **Drive images.** An empty, growable .vhdx the size of the drive is created and attached with
+  `diskpart`, and the drive is cloned into it exactly as above, so only used clusters are written
+  and the file stays about the size of the data. Restoring attaches the image read-only and clones
+  it onto the chosen drive. A half-written image is deleted if anything goes wrong.
 - **Finding the new PC.** The old PC broadcasts a short question on UDP port 47801 and every PC
   waiting to receive answers with its name, so nobody has to look up an IP address.
 - **The app window.** The screens are a web page (`src/PcMigrate.App/ui/index.html`) shown with
@@ -235,6 +248,7 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 6. License key finder ← done
 7. Drive health check ← done
 8. Password-protected backups ← done
-9. Disk images, rescue USB, scheduled backups, technician mode
-10. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
-11. Licensing, installer and a place to sell it
+9. Keep program installers, and install runtimes (VC++, .NET, Java) automatically ← done
+10. Disk images (.vhdx), save and restore ← done
+11. Rescue USB, scheduled backups, technician mode
+12. Licensing, installer and a place to sell it

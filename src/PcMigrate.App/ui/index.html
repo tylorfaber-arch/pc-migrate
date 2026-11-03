@@ -308,6 +308,11 @@ summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 .shimmer { display: inline-block; width: 80px; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--border), var(--surface-2), var(--border)); background-size: 200% 100%; animation: sh 1.2s linear infinite; vertical-align: middle; }
 @keyframes sh { to { background-position: -200% 0; } }
+.seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--surface-2); margin-bottom: 14px; flex-wrap: wrap; }
+.seg button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.pick-row { display: flex; align-items: center; gap: 12px; }
+.pick-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-m { flex: none; font-size: 11px; font-weight: 650; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .badge-m.Reinstall { background: var(--ok-soft); color: var(--ok); }
 .badge-m.Copy { background: var(--warn-soft); color: var(--warn); }
@@ -390,8 +395,8 @@ footer .grow { flex: 1; }
       </button>
       <button class="choice wide" data-go="clone">
         <div class="icon"><svg><use href="#i-clone"/></svg></div>
-        <div><h2>Clone a whole drive</h2>
-        <p>Make an exact copy of one drive onto another, ready to start up. Works with this PC's drive or two USB drives.</p></div>
+        <div><h2>Clone or image a whole drive</h2>
+        <p>Make an exact copy of one drive onto another, or save it as one image file to put back later. The copy starts up on its own.</p></div>
       </button>
     </div>
     <div class="tools"><span class="label">Tools</span>
@@ -486,14 +491,24 @@ footer .grow { flex: 1; }
   <!-- CLONE: PICK DRIVES -->
   <section class="screen" id="s-clone">
     <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
-    <div class="title"><h1>Clone a whole drive</h1><p>Everything comes across: Windows, programs, files and the recovery partition. If the new drive is bigger, the extra space is added to the main partition.</p></div>
-    <div class="card">
+    <div class="title"><h1 id="cloneTitle">Clone a whole drive</h1><p id="cloneIntro">Everything comes across: Windows, programs, files and the recovery partition. If the new drive is bigger, the extra space is added to the main partition.</p></div>
+    <div class="seg" id="cloneMode">
+      <button data-mode="clone" class="on">Drive to drive</button>
+      <button data-mode="image">Drive to image file</button>
+      <button data-mode="restore">Image file to drive</button>
+    </div>
+    <div class="card" id="imageFileCard" style="display:none">
+      <h2 id="imageFileHead">Image file</h2>
+      <div class="pick-row"><div class="grow"><div class="name" id="imageFileName">None chosen</div><div class="faint" id="imageFileSub"></div></div>
+        <button class="btn ghost" id="pickImage">Choose…</button></div>
+    </div>
+    <div class="card" id="cloneFromCard">
       <div class="card-head"><h2>Copy from</h2><span class="spacer"></span><button class="btn ghost" id="refreshDisks">Look again</button></div>
       <div class="rows" id="cloneFrom"></div>
       <div id="disksLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for drives…</div>
     </div>
-    <div class="card">
-      <h2>Copy to <span class="faint" style="font-weight:400;font-size:13px">(everything on it will be erased)</span></h2>
+    <div class="card" id="cloneToCard">
+      <div class="card-head"><h2>Copy to <span class="faint" style="font-weight:400;font-size:13px">(everything on it will be erased)</span></h2><span class="spacer"></span><button class="btn ghost" id="refreshDisks2" style="display:none">Look again</button></div>
       <div class="rows" id="cloneTo"></div>
     </div>
     <div class="actions"><span class="muted" id="cloneNote"></span><span class="spacer"></span><button class="btn" id="cloneNext" disabled>Next</button></div>
@@ -885,7 +900,40 @@ $("saveKeys").addEventListener("click", async () => {
 });
 
 // ----- clone a whole drive -----
-let disks = [], cloneFrom = null, cloneTo = null, clonePlan = null;
+let disks = [], cloneFrom = null, cloneTo = null, clonePlan = null, cloneMode = "clone", imageFolder = null, imageFile = null;
+const MODE_TEXT = {
+  clone: ["Clone a whole drive", "Everything comes across: Windows, programs, files and the recovery partition. If the new drive is bigger, the extra space is added to the main partition."],
+  image: ["Save a drive as an image", "The whole drive goes into one file, and only the space in use is saved. Put it back on any drive later, or double-click the file in File Explorer to open it and copy single files out."],
+  restore: ["Put an image back on a drive", "The drive gets everything the image holds and starts up on its own. If the drive is bigger than the original, the extra space is added to the main partition."],
+};
+function setCloneMode(m) {
+  cloneMode = m;
+  document.querySelectorAll("#cloneMode button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  [$("cloneTitle").textContent, $("cloneIntro").textContent] = MODE_TEXT[m];
+  $("imageFileCard").style.display = m === "clone" ? "none" : "";
+  // Read top to bottom: what's copied, then where it goes.
+  if (m === "image") $("cloneFromCard").after($("imageFileCard")); else $("cloneFromCard").before($("imageFileCard"));
+  $("cloneFromCard").style.display = m === "restore" ? "none" : "";
+  $("cloneToCard").style.display = m === "image" ? "none" : "";
+  $("refreshDisks2").style.display = m === "restore" ? "" : "none";
+  $("imageFileHead").textContent = m === "image" ? "Save the image to" : "Image to put back";
+  renderImagePick();
+  renderDisks();
+}
+function renderImagePick() {
+  const pick = cloneMode === "image" ? imageFolder : imageFile;
+  $("imageFileName").textContent = pick ? pick.path : (cloneMode === "image" ? "No folder chosen (use a different drive from the one being saved)" : "No image chosen");
+  $("imageFileSub").textContent = !pick ? "" : cloneMode === "image" ? (pick.freeBytes != null ? fmtBytes(pick.freeBytes) + " free" : "") : fmtBytes(pick.size) + " image file";
+}
+document.querySelectorAll("#cloneMode button").forEach(b => b.addEventListener("click", () => setCloneMode(b.dataset.mode)));
+$("pickImage").addEventListener("click", async () => {
+  try {
+    const r = await call(cloneMode === "image" ? "pickImageFolder" : "pickImageFile");
+    if (!r) return;
+    if (cloneMode === "image") imageFolder = r; else imageFile = r;
+    renderImagePick(); renderDisks();
+  } catch (e) { toast(e.message); }
+});
 async function findDisks() {
   cloneFrom = cloneTo = null; $("cloneNext").disabled = true;
   $("disksLooking").style.display = "flex"; $("cloneFrom").innerHTML = $("cloneTo").innerHTML = ""; $("cloneNote").textContent = "";
@@ -894,6 +942,7 @@ async function findDisks() {
   renderDisks();
 }
 $("refreshDisks").addEventListener("click", findDisks);
+$("refreshDisks2").addEventListener("click", findDisks);
 function diskRow(d, picked, why) {
   const tags = [d.isSystem ? '<span class="pill">This PC\'s Windows</span>' : "", d.hasWindows && !d.isSystem ? '<span class="pill">Has Windows</span>' : "", picked ? '<span class="pill ok">Selected</span>' : ""].join("");
   return `<div class="row pc-row disk-row ${picked ? "sel" : ""} ${why ? "off" : ""}" data-n="${d.number}" title="${esc(why || "")}">
@@ -910,20 +959,39 @@ function renderDisks() {
   }
   $("cloneFrom").innerHTML = disks.map(d => diskRow(d, cloneFrom === d.number)).join("");
   $("cloneTo").innerHTML = disks.map(d => diskRow(d, cloneTo === d.number,
-    d.isSystem ? "This PC is running from it, so it can't be erased." : cloneFrom === d.number ? "That's the drive you're copying from." : null)).join("");
+    d.isSystem ? "This PC is running from it, so it can't be erased." : cloneMode === "clone" && cloneFrom === d.number ? "That's the drive you're copying from." : null)).join("");
   $("cloneFrom").querySelectorAll(".disk-row").forEach(el => el.addEventListener("click", () => {
     cloneFrom = +el.dataset.n; if (cloneTo === cloneFrom) cloneTo = null; renderDisks();
   }));
   $("cloneTo").querySelectorAll(".disk-row:not(.off)").forEach(el => el.addEventListener("click", () => { cloneTo = +el.dataset.n; renderDisks(); }));
-  $("cloneNext").disabled = cloneFrom == null || cloneTo == null;
+  $("cloneNext").disabled = cloneMode === "clone" ? cloneFrom == null || cloneTo == null
+    : cloneMode === "image" ? cloneFrom == null || !imageFolder
+    : !imageFile || cloneTo == null;
 }
 $("cloneNext").addEventListener("click", async () => {
   const b = $("cloneNext"); b.disabled = true; $("cloneNote").textContent = "Working out the layout…";
-  try { renderPlan(await call("planClone", { from: cloneFrom, to: cloneTo })); show("clone-plan"); } catch (e) { toast(e.message); }
+  try {
+    if (cloneMode === "clone") renderPlan(await call("planClone", { from: cloneFrom, to: cloneTo }));
+    else if (cloneMode === "image") renderImagePlan(await call("planImage", { from: cloneFrom, folder: imageFolder.path }));
+    else renderPlan(await call("planRestore", { file: imageFile.path, to: cloneTo }));
+    show("clone-plan");
+  } catch (e) { toast(e.message); }
   $("cloneNote").textContent = ""; b.disabled = false;
 });
+function renderImagePlan(p) {
+  clonePlan = p;
+  $("cpFrom").textContent = p.source.model; $("cpFromSub").textContent = fmtBytes(p.source.size);
+  $("cpTo").textContent = p.file.split("\\").pop(); $("cpToSub").textContent = p.file.slice(0, p.file.lastIndexOf("\\") + 1);
+  $("clonePlanSub").textContent = p.canRun ? `The image file will be about ${fmtBytes(p.bytesToCopy)}. Nothing on ${p.source.model} is changed.` : "This needs a change first.";
+  $("cpProblem").innerHTML = healthBanner(p.sourceHealth).replace('class="health', 'style="margin:14px 0 0" class="health') + (p.problem ? `<div class="problem"><div class="grow">${esc(p.problem)}</div></div>` : "");
+  $("cpPartsCard").style.display = "none";
+  $("cpErase").style.display = "none";
+  $("startClone").textContent = "Save the image";
+  $("startClone").disabled = !p.canRun;
+}
 function renderPlan(p) {
   clonePlan = p;
+  $("startClone").textContent = cloneMode === "restore" ? "Put the image back" : "Start the clone";
   $("cpFrom").textContent = p.source.model; $("cpFromSub").textContent = fmtBytes(p.source.size);
   $("cpTo").textContent = p.target.model; $("cpToSub").textContent = fmtBytes(p.target.size) + (p.target.serial ? " · serial " + p.target.serial : "");
   $("clonePlanSub").textContent = p.canRun ? `About ${fmtBytes(p.bytesToCopy)} to copy. Empty space is skipped, so it's quicker than the drive size suggests.` : "This pair of drives needs a change first.";
@@ -945,6 +1013,36 @@ function renderPlan(p) {
 $("cpEraseInput").addEventListener("input", e => { $("startClone").disabled = !(clonePlan && clonePlan.canRun && e.target.value.trim() === "ERASE"); });
 $("startClone").addEventListener("click", async () => {
   const p = clonePlan;
+  if (cloneMode === "image") {
+    startProgress("Saving the drive as an image", p.bytesToCopy, { files: false });
+    $("progSub").textContent = "Leave both drives plugged in until it's done.";
+    try {
+      const r = await call("makeImage", { from: cloneFrom, folder: imageFolder.path });
+      showDone({
+        title: "Image saved",
+        sub: `${p.source.model} is saved in ${r.file}. To put it back, choose "Image file to drive". To open it, double-click the file in File Explorer.`,
+        stats: [["Image file", fmtBytes(r.fileSize)], ["Time", fmtTime(r.seconds)], ["Drive", fmtBytes(p.source.size)]],
+        warnings: [...state.warnings, ...(r.notes || []).filter(n => !/Double-click/.test(n))], logPath: r.logPath,
+      });
+    } catch (e) { showError(e); }
+    $("progSub").textContent = "You can keep using the PC while this runs.";
+    return;
+  }
+  if (cloneMode === "restore") {
+    startProgress("Putting the image back", p.bytesToCopy, { files: false });
+    $("progSub").textContent = "Leave the drive plugged in until it's done.";
+    try {
+      const r = await call("restoreImage", { file: imageFile.path, to: cloneTo });
+      showDone({
+        title: "Image restored",
+        sub: `${p.target.model} now holds everything from ${p.source.model}. Put it in the PC and start up.`,
+        stats: [["Copied", fmtBytes(r.bytes)], ["Time", fmtTime(r.seconds)], ["Drive", fmtBytes(p.target.size)]],
+        warnings: [...state.warnings, ...(r.notes || [])], logPath: r.logPath,
+      });
+    } catch (e) { showError(e); }
+    $("progSub").textContent = "You can keep using the PC while this runs.";
+    return;
+  }
   startProgress("Cloning the drive", p.bytesToCopy, { files: false });
   $("progSub").textContent = "Leave both drives plugged in until it's done.";
   try {
@@ -1370,6 +1468,18 @@ const Mock = {
         users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
       case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
       case "readStore": if (args.password !== undefined && args.password !== "" && args.password !== "correct horse") return setTimeout(() => receive({ id, error: "That password is wrong." }), 300); return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
+      case "pickImageFolder": return reply({ path: "E:\\Images", freeBytes: 640e9 });
+      case "pickImageFile": return reply({ path: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 212e9 });
+      case "planImage": return reply({ canRun: true, problem: null, file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytesToCopy: 214e9,
+        source: { number: args.from, model: "Samsung SSD 980 500GB", size: 500e9 }, sourceHealth: null }, 500);
+      case "planRestore": return reply({ canRun: true, problem: null, shrinkBy: 0, shrinkLetter: null, bytesToCopy: 212e9,
+        source: { number: -1, model: "TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 500e9 }, target: { number: args.to, model: "Crucial MX500 2TB", size: 2e12, serial: "2204E6" },
+        partitions: [{ label: "Boot (EFI)", from: 100e6, to: 100e6 }, { label: "Reserved", from: 16e6, to: 16e6 }, { label: "NTFS", from: 498e9, to: 1.99e12, grows: true }, { label: "Recovery", from: 750e6, to: 750e6 }], sourceHealth: null }, 800);
+      case "makeImage": case "restoreImage": {
+        const total = 214e9; let b = 0;
+        const t = setInterval(() => { b += total / 40; receive({ event: "progress", files: 0, bytes: b, path: "NTFS" }); if (b >= total) clearInterval(t); }, 120);
+        return reply({ file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytes: 214e9, fileSize: 205e9, seconds: 2100, notes: [], logPath: "C:\\ProgramData\\pc-migrate\\image.log" }, 5200);
+      }
       case "clone": {
         const total = 214e9; let b = 0;
         const t = setInterval(() => { b += total / 40; receive({ event: "progress", files: 0, bytes: b, path: "C: NTFS" }); if (b >= total) clearInterval(t); }, 120);

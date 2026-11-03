@@ -70,6 +70,12 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "planClone" => await Task.Run(() => PlanClone(Int(args, "from", -1), Int(args, "to", -1)).View),
         "shrinkSource" => await Task.Run(() => ShrinkSource(Int(args, "from", -1), Int(args, "to", -1))),
         "clone" => await Clone(Int(args, "from", -1), Int(args, "to", -1)),
+        "pickImageFolder" => PickImageFolder(),
+        "pickImageFile" => PickImageFile(),
+        "planImage" => await Task.Run(() => PlanImage(Int(args, "from", -1), Str(args, "folder"))),
+        "makeImage" => await MakeImage(Int(args, "from", -1), Str(args, "folder")),
+        "planRestore" => await PlanRestore(Str(args, "file"), Int(args, "to", -1)),
+        "restoreImage" => await RestoreImage(Str(args, "file"), Int(args, "to", -1)),
         "installUpdate" => await InstallUpdate(),
         "listDrives" => await Task.Run(ListDrives),
         "unlockDrive" => await Task.Run(() => UnlockDrive(Str(args, "root"), Str(args, "key"))),
@@ -161,6 +167,110 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _notify.Failed("Clone stopped", Friendly(ex), logPath);
+            throw;
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    // ----- disk images -----
+
+    private object? PickImageFolder()
+    {
+        using var dialog = new FolderBrowserDialog { Description = "Choose where to save the image (on a different drive)", UseDescriptionForTitle = true, ShowNewFolderButton = true };
+        if (dialog.ShowDialog(form) != DialogResult.OK) return null;
+        long? free = null;
+        try { free = new DriveInfo(Path.GetPathRoot(dialog.SelectedPath)!).AvailableFreeSpace; } catch (Exception ex) when (ex is IOException or ArgumentException) { }
+        return new { path = dialog.SelectedPath, freeBytes = free };
+    }
+
+    private object? PickImageFile()
+    {
+        using var dialog = new OpenFileDialog { Title = "Choose a drive image", Filter = "Drive images (*.vhdx;*.vhd)|*.vhdx;*.vhd", CheckFileExists = true };
+        if (dialog.ShowDialog(form) != DialogResult.OK) return null;
+        return new { path = dialog.FileName, size = new FileInfo(dialog.FileName).Length };
+    }
+
+    private static (DiskInfo Source, string File, string? Problem) ImageTarget(int from, string folder)
+    {
+        var source = Disks.List().FirstOrDefault(d => d.Number == from) ?? throw new InvalidOperationException("Pick the drive to image.");
+        if (string.IsNullOrWhiteSpace(folder)) throw new InvalidOperationException("Pick where to save the image.");
+        var file = Path.Combine(folder, DiskImage.SuggestName(source));
+        return (source, file, DiskImage.CheckCreate(source, file));
+    }
+
+    private static object PlanImage(int from, string folder)
+    {
+        var (source, file, problem) = ImageTarget(from, folder);
+        return new
+        {
+            canRun = problem is null, problem, file, bytesToCopy = DiskImage.NeededBytes(source),
+            source = new { number = source.Number, model = source.Model, size = source.Size },
+            sourceHealth = HealthReader.All().FirstOrDefault(h => h.DiskNumber == source.Number) is { } h ? HealthView(h) : null,
+        };
+    }
+
+    private async Task<object> MakeImage(int from, string folder)
+    {
+        var (source, file, problem) = await Task.Run(() => ImageTarget(from, folder));
+        if (problem is not null) throw new InvalidOperationException(problem);
+        var ct = BeginWork();
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"image-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        using var log = new GuiLog(Post, logPath) { OnProgress = (_, bytes) => _notify.Progress(bytes, DiskImage.NeededBytes(source)) };
+        try
+        {
+            var result = await Task.Run(() => new DiskImage(log).CreateAsync(source, file, ct), ct);
+            _notify.Finished("Image saved", $"{source.Model} saved to {Path.GetFileName(result.ImagePath)}.", logPath);
+            return new { file = result.ImagePath, bytes = result.BytesCopied, fileSize = result.FileSize, seconds = result.Elapsed.TotalSeconds, notes = result.Notes, logPath };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Image stopped", Friendly(ex), logPath);
+            throw;
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    private async Task<object> PlanRestore(string file, int to)
+    {
+        var plan = await new DiskImage(NullLog.Instance).PlanRestoreAsync(file, to, CancellationToken.None);
+        return new
+        {
+            canRun = plan.CanRun, problem = plan.Problem, shrinkBy = 0, shrinkLetter = (string?)null,
+            bytesToCopy = plan.CanRun ? plan.BytesToCopy : 0,
+            source = new { number = -1, model = Path.GetFileName(file), size = plan.Source.Size },
+            target = new { number = plan.Target.Number, model = plan.Target.Model, size = plan.Target.Size, serial = plan.Target.Serial },
+            partitions = plan.Partitions.Select(p => new
+            {
+                label = p.Source.IsEfi ? "Boot (EFI)" : p.Source.IsMsr ? "Reserved" : p.Source.IsRecovery ? "Recovery" : p.Source.FileSystem ?? "Data",
+                from = p.Source.Length, to = p.Length, grows = p.Grows,
+            }),
+            sourceHealth = (object?)null,
+        };
+    }
+
+    private async Task<object> RestoreImage(string file, int to)
+    {
+        var ct = BeginWork();
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"restore-image-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        long total = 0;
+        using var log = new GuiLog(Post, logPath) { OnProgress = (_, bytes) => _notify.Progress(bytes, Math.Max(total, bytes)) };
+        try
+        {
+            var image = new DiskImage(log);
+            total = (await image.PlanRestoreAsync(file, to, ct)).BytesToCopy;
+            var result = await Task.Run(() => image.RestoreAsync(file, to, ct), ct);
+            _notify.Finished("Image restored", $"{CaptureEngine.FormatBytes(result.BytesCopied)} restored in {(int)result.Elapsed.TotalMinutes} min.", logPath);
+            return new { bytes = result.BytesCopied, seconds = result.Elapsed.TotalSeconds, notes = result.Notes, logPath };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Restore stopped", Friendly(ex), logPath);
             throw;
         }
         finally

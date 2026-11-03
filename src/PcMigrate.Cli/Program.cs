@@ -104,6 +104,8 @@ async Task<int> Run(string[] argv)
             "health" => Health(),
             "disks" => ListDisks(),
             "clone" => await CloneDisk(),
+            "image" => await MakeImage(),
+            "restore-image" => await RestoreImage(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
             "capture" => await Capture(),
@@ -189,6 +191,47 @@ async Task<int> Run(string[] argv)
         var result = await new DiskCloner(log).RunAsync(plan, cts.Token);
         foreach (var note in result.Notes) log.Warn(note);
         return Done($"Cloned {CaptureEngine.FormatBytes(result.BytesCopied)} in {result.Elapsed:h\\:mm\\:ss}. Put the new drive in the PC and start it up.", result.Notes.Count);
+    }
+
+    async Task<int> MakeImage()
+    {
+        var from = cli.GetInt("from", -1);
+        var to = cli.Get("to");
+        cli.RejectUnknown();
+        if (from < 0 || to is null) return Fail("Say which disk and where: --from <disk number> --to <folder or .vhdx file>. 'pcmigrate-cli disks' lists them.");
+        var source = Disks.List().FirstOrDefault(d => d.Number == from) ?? throw new ArgumentException($"There's no disk {from}.");
+        var file = to.EndsWith(DiskImage.Extension, StringComparison.OrdinalIgnoreCase) ? to : Path.Combine(to, DiskImage.SuggestName(source));
+        if (DiskImage.CheckCreate(source, Path.GetFullPath(file)) is { } problem) return Fail(problem);
+        Console.WriteLine($"Imaging {source.Describe()}");
+        Console.WriteLine($"Into {Path.GetFullPath(file)} (about {CaptureEngine.FormatBytes(DiskImage.NeededBytes(source))})");
+        var result = await new DiskImage(log).CreateAsync(source, file, cts.Token);
+        foreach (var note in result.Notes) log.Info(note);
+        return Done($"Image saved: {result.ImagePath} ({CaptureEngine.FormatBytes(result.FileSize)}, {result.Elapsed:h\\:mm\\:ss}).", 0);
+    }
+
+    async Task<int> RestoreImage()
+    {
+        var from = cli.Get("from");
+        var to = cli.GetInt("to", -1);
+        var yes = cli.Flag("yes");
+        cli.RejectUnknown();
+        if (from is null || to < 0) return Fail("Say which image and which disk: --from <file.vhdx> --to <disk number>. 'pcmigrate-cli disks' lists them.");
+        var image = new DiskImage(log);
+        var plan = await image.PlanRestoreAsync(from, to, cts.Token);
+        if (!plan.CanRun) return Fail(plan.Problem!);
+        Console.WriteLine($"Image: {Path.GetFullPath(from)} (made from a {CaptureEngine.FormatBytes(plan.Source.Size)} drive)");
+        Console.WriteLine($"To:    {plan.Target.Describe()}");
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"Everything on disk {to} ({plan.Target.Model}) will be erased.");
+        Console.ResetColor();
+        if (!yes)
+        {
+            Console.Write($"Type ERASE {to} to go ahead: ");
+            if (!string.Equals(Console.ReadLine()?.Trim(), $"ERASE {to}", StringComparison.OrdinalIgnoreCase)) return Fail("Not confirmed; nothing was changed.");
+        }
+        var result = await image.RestoreAsync(from, to, cts.Token);
+        foreach (var note in result.Notes) log.Warn(note);
+        return Done($"Restored {CaptureEngine.FormatBytes(result.BytesCopied)} in {result.Elapsed:h\\:mm\\:ss}. Put the drive in the PC and start it up.", result.Notes.Count);
     }
 
     async Task<int> SelfUpdate()
@@ -488,6 +531,11 @@ async Task<int> Run(string[] argv)
                                            Copy a whole disk so the copy starts up on its own.
                                            Erases the target. --shrink-source shrinks the source's
                                            main partition first when the target is smaller.
+              pcmigrate-cli image --from <n> --to <folder or file.vhdx>
+                                           Save a whole disk as one image file (only the space in use).
+                                           Double-click the file in Explorer to open it and copy files out.
+              pcmigrate-cli restore-image --from <file.vhdx> --to <n> [--yes]
+                                           Put an image back onto a disk so it starts up. Erases the disk.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):

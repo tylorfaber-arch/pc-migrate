@@ -24,7 +24,8 @@ public sealed class DiskCloner(IMigrationLog log)
 
     public sealed record Result(long BytesCopied, TimeSpan Elapsed, List<string> Notes);
 
-    public async Task<Result> RunAsync(ClonePlan plan, CancellationToken ct)
+    /// <param name="useSnapshots">False when the source can't change during the copy (a read-only image).</param>
+    public async Task<Result> RunAsync(ClonePlan plan, CancellationToken ct, bool useSnapshots = true)
     {
         if (!plan.CanRun) throw new InvalidOperationException(plan.Problem);
         var started = DateTime.UtcNow;
@@ -36,7 +37,7 @@ public sealed class DiskCloner(IMigrationLog log)
         var targetOffline = false;
         try
         {
-            foreach (var p in plan.Partitions.Select(x => x.Source).Where(p => p.IsNtfs && p.DriveLetter is not null))
+            foreach (var p in plan.Partitions.Select(x => x.Source).Where(p => useSnapshots && p.IsNtfs && p.DriveLetter is not null))
             {
                 ct.ThrowIfCancellationRequested();
                 try
@@ -55,10 +56,10 @@ public sealed class DiskCloner(IMigrationLog log)
             if (automountWasOn) ProcessRunner.Run("mountvol.exe", "/N");
 
             log.Info($"Erasing {plan.Target.Describe()} and writing the new partition table...");
-            Diskpart($"select disk {plan.Target.Number}", "attributes disk clear readonly", "online disk noerr", "clean");
+            Diskpart.Run($"select disk {plan.Target.Number}", "attributes disk clear readonly", "online disk noerr", "clean");
             var ids = WriteLayout(plan);
 
-            Diskpart($"select disk {plan.Target.Number}", "offline disk");
+            Diskpart.Run($"select disk {plan.Target.Number}", "offline disk");
             targetOffline = true;
 
             long done = 0;
@@ -75,14 +76,14 @@ public sealed class DiskCloner(IMigrationLog log)
                 }
             }
 
-            Diskpart($"select disk {plan.Target.Number}", "online disk");
+            Diskpart.Run($"select disk {plan.Target.Number}", "online disk");
             targetOffline = false;
             FinishTarget(plan, ids, notes);
             return new Result(done, DateTime.UtcNow - started, notes);
         }
         finally
         {
-            if (targetOffline) Diskpart($"select disk {plan.Target.Number}", "online disk");
+            if (targetOffline) Diskpart.Run($"select disk {plan.Target.Number}", "online disk");
             if (automountWasOn) ProcessRunner.Run("mountvol.exe", "/E");
             foreach (var s in snapshots.Values) s.Dispose();
         }
@@ -187,7 +188,7 @@ public sealed class DiskCloner(IMigrationLog log)
         if (main.Grows) script.Add("extend filesystem noerr");
         if (s != w) script.AddRange([$"select partition {bootIndex + 1}", $"assign letter={s}"]);
         log.Info(main.Grows ? "Growing the main partition to fill the drive..." : "Checking the copy...");
-        Diskpart([.. script]);
+        Diskpart.Run([.. script]);
         try
         {
             var windows = $@"{w}:\Windows";
@@ -209,7 +210,7 @@ public sealed class DiskCloner(IMigrationLog log)
         {
             var remove = new List<string> { $"select disk {plan.Target.Number}", $"select partition {mainIndex + 1}", $"remove letter={w} noerr" };
             if (s != w) remove.AddRange([$"select partition {bootIndex + 1}", $"remove letter={s} noerr"]);
-            Diskpart([.. remove]);
+            Diskpart.Run([.. remove]);
         }
     }
 
@@ -241,10 +242,30 @@ public sealed class DiskCloner(IMigrationLog log)
     public static string ShrinkVolume(string letter, long bytes)
     {
         var mb = (bytes + 1024 * 1024 - 1) / (1024 * 1024);
-        return Diskpart($"select volume {letter}", $"shrink desired={mb}");
+        return Diskpart.Run($"select volume {letter}", $"shrink desired={mb}");
     }
 
-    private static string Diskpart(params string[] commands)
+    private static bool AutomountEnabled()
+    {
+        using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\mountmgr");
+        return key?.GetValue("NoAutoMount") is not int n || n == 0;
+    }
+
+    private static List<char> FreeLetters()
+    {
+        var used = DriveInfo.GetDrives().Select(d => char.ToUpperInvariant(d.Name[0])).ToHashSet();
+        return "WVUTSRQPONMLKJIHG".Where(c => !used.Contains(c)).ToList();
+    }
+
+    private static string Label(PartitionInfo p) =>
+        p.IsEfi ? "boot (EFI)" : p.IsMsr ? "reserved" : p.IsRecovery ? "recovery" : p.DriveLetter is { } d ? $"{d}:" : p.FileSystem ?? "data";
+}
+
+/// <summary>Runs Windows' disk tool (diskpart) with a script of commands.</summary>
+[SupportedOSPlatform("windows")]
+internal static class Diskpart
+{
+    public static string Run(params string[] commands)
     {
         var script = Path.Combine(Path.GetTempPath(), "pcmigrate-diskpart-" + Guid.NewGuid().ToString("N") + ".txt");
         File.WriteAllLines(script, commands);
@@ -263,19 +284,4 @@ public sealed class DiskCloner(IMigrationLog log)
 
     private static string LastLines(string output) =>
         string.Join(" ", output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).TakeLast(3));
-
-    private static bool AutomountEnabled()
-    {
-        using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\mountmgr");
-        return key?.GetValue("NoAutoMount") is not int n || n == 0;
-    }
-
-    private static List<char> FreeLetters()
-    {
-        var used = DriveInfo.GetDrives().Select(d => char.ToUpperInvariant(d.Name[0])).ToHashSet();
-        return "WVUTSRQPONMLKJIHG".Where(c => !used.Contains(c)).ToList();
-    }
-
-    private static string Label(PartitionInfo p) =>
-        p.IsEfi ? "boot (EFI)" : p.IsMsr ? "reserved" : p.IsRecovery ? "recovery" : p.DriveLetter is { } d ? $"{d}:" : p.FileSystem ?? "data";
 }
