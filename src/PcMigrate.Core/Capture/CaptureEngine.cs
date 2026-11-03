@@ -59,7 +59,7 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
                 manifest.UsedShadowCopy = snapshots.Count > 0;
             }
 
-            long files = 0, bytes = 0;
+            long files = 0, bytes = 0, unchanged = 0;
             // Problems reading one file are warnings; a SinkWriteException (drive full,
             // network dropped) is not caught here and stops the capture.
             var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -76,6 +76,16 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
                 try
                 {
                     FileWriteResult written;
+                    if (sink.TryReuse(storePath, new FileInfo(fullPath).Length, lastWriteUtc, out var kept))
+                    {
+                        // Unchanged since the last backup: already in the store.
+                        manifest.Files.Add(new ManifestFile { StorePath = storePath, Length = kept.Length, LastWriteUtc = lastWriteUtc, Sha256 = kept.Sha256 });
+                        files++;
+                        bytes += kept.Length;
+                        unchanged++;
+                        log.FileProgress(files, bytes, storePath);
+                        return true;
+                    }
                     await using (var input = HashingCopy.OpenForRead(fullPath))
                         written = await sink.AddFileAsync(storePath, input, lastWriteUtc, ct);
                     manifest.Files.Add(new ManifestFile { StorePath = storePath, Length = written.Length, LastWriteUtc = lastWriteUtc, Sha256 = written.Sha256 });
@@ -151,6 +161,7 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
 
             foreach (var app in manifest.Apps.Where(a => a.Method == AppMethod.Manual))
                 log.Info($"To install by hand: {app.Name} ({app.Reason})");
+            if (unchanged > 0) log.Info($"{unchanged:N0} of the files hadn't changed since the last backup, so they were kept as they were.");
             log.Info($"Captured {files:N0} files ({FormatBytes(bytes)}). Writing manifest...");
             await sink.CompleteAsync(manifest, ct);
             var manual = manifest.Apps.Count(a => a.Method == AppMethod.Manual);

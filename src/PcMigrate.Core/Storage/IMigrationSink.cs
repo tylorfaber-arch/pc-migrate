@@ -12,6 +12,16 @@ public interface IMigrationSink : IAsyncDisposable
     /// <summary>Stores one file and returns its SHA-256 as lowercase hex.</summary>
     Task<FileWriteResult> AddFileAsync(string storePath, Stream content, DateTime lastWriteUtc, CancellationToken ct);
 
+    /// <summary>
+    /// For a backup being brought up to date: true when the store already holds this file
+    /// unchanged (same size and time) from the last run, so it needn't be copied again.
+    /// </summary>
+    bool TryReuse(string storePath, long length, DateTime lastWriteUtc, out FileWriteResult result)
+    {
+        result = default;
+        return false;
+    }
+
     /// <summary>Writes the manifest. Called once, after every file.</summary>
     Task CompleteAsync(Manifest manifest, CancellationToken ct);
 }

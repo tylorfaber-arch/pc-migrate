@@ -87,6 +87,14 @@ Only the space in use is saved, so a 1 TB drive holding 200 GB makes a file of a
 The image is a normal Windows virtual disk (.vhdx): double-click it in File Explorer and it opens
 like a USB drive, so single files can be copied out of it without restoring anything.
 
+**Scheduled backups.** **Tools → Scheduled backup** (or `pcmigrate-cli schedule --to E:\Backups
+--every daily --at 21:00`) keeps a backup of the PC up to date by itself, daily or weekly, even when
+nobody is signed in. Each run copies only new and changed files and removes files that were deleted
+from the PC, so after the first one it's quick. If the PC was off at backup time it catches up when
+it's next on; if the backup drive isn't plugged in, it tries again next time. The screen shows the
+last result. The backup is an ordinary pc-migrate backup, so it loads onto a new PC the usual way.
+`pcmigrate-cli backup --to <folder>` does the same update once, by hand.
+
 **Rescue USB.** For a PC whose Windows won't start at all: **Tools → Rescue USB** (or
 `pcmigrate-cli rescue-usb --disk <n>`) turns a USB stick into one that starts any PC straight into
 pc-migrate's menu. Choose 6 there to save the PC's files to the stick or another USB drive, no
@@ -186,6 +194,12 @@ Licence keys and sign-ins don't move.
   `diskpart`, and the drive is cloned into it exactly as above, so only used clusters are written
   and the file stays about the size of the data. Restoring attaches the image read-only and clones
   it onto the chosen drive. A half-written image is deleted if anything goes wrong.
+- **Scheduled backups.** A Task Scheduler entry runs `pcmigrate-cli backup --scheduled` as SYSTEM
+  from a copy kept in `C:\ProgramData\pc-migrate`. Settings and the last result are in
+  `schedule.json` there, readable only by SYSTEM and administrators; a backup password is stored
+  locked to the PC with Windows DPAPI. Each run reads the last manifest and skips any file with the
+  same size and modified time, then writes the new manifest in one step and deletes stored files it
+  no longer lists.
 - **Rescue USB.** The stick gets a 2 GB FAT32 boot part and an NTFS part for backups. A copy of
   the PC's Windows recovery image (winre.wim, from its recovery partition or System32\Recovery) is
   opened with DISM, and a `winpeshl.ini` is added so it opens pc-migrate instead of the recovery
@@ -264,5 +278,6 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 9. Keep program installers, and install runtimes (VC++, .NET, Java) automatically ← done
 10. Disk images (.vhdx), save and restore ← done
 11. Rescue USB ← done
-12. Scheduled backups, technician mode
-13. Licensing, installer and a place to sell it
+12. Scheduled backups ← done
+13. Technician mode
+14. Licensing, installer and a place to sell it
