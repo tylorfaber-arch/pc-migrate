@@ -33,6 +33,10 @@ public sealed class ApplyOptions
     public bool MoveFromStore { get; init; }
     /// <summary>Keys of the programs to install or copy. Null means every program that can move.</summary>
     public IReadOnlySet<string>? AppKeys { get; init; }
+    /// <summary>The password of a password-protected backup.</summary>
+    public string? Password { get; init; }
+    /// <summary>Where a protected backup is unlocked before it's put in place (default C:\ProgramData\pc-migrate). Emptied afterwards.</summary>
+    public string? WorkFolder { get; init; }
 }
 
 public sealed class ApplyResult
@@ -53,7 +57,32 @@ public sealed class ApplyResult
 /// <summary>Puts a migration store onto this (new) PC.</summary>
 public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatform? apps = null)
 {
+    private bool _unlocked;
+    private string? _reportFolder;
+
     public async Task<ApplyResult> RunAsync(string storeRoot, ApplyOptions options, CancellationToken ct = default)
+    {
+        if (!FolderSink.IsProtected(storeRoot)) return await RunPlainAsync(storeRoot, options, ct);
+
+        // A protected backup is unlocked onto this PC first, then its files are moved (not copied) into place.
+        // The report stays on this PC too: it lists license keys, which shouldn't sit unprotected on the drive.
+        var work = options.WorkFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate");
+        var plain = Path.Combine(work, $"unlocked-{Guid.NewGuid():N}");
+        try
+        {
+            await StoreUnlocker.UnlockAsync(storeRoot, options.Password ?? "", plain, log, ct);
+            _unlocked = true;
+            _reportFolder = work;
+            return await RunPlainAsync(plain, options, ct);
+        }
+        finally
+        {
+            try { if (Directory.Exists(plain)) Directory.Delete(plain, recursive: true); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log.Warn($"Couldn't remove the unlocked copy at {plain}: {ex.Message}. Delete it by hand."); }
+        }
+    }
+
+    private async Task<ApplyResult> RunPlainAsync(string storeRoot, ApplyOptions options, CancellationToken ct)
     {
         var manifest = FolderSink.ReadManifest(storeRoot);
         var source = manifest.Inventory;
@@ -134,7 +163,7 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatf
                 continue;
             }
 
-            if (options.MoveFromStore ? await MoveFromStoreAsync(storeRoot, file, destination, warn, ct) : await CopyFromStoreAsync(storeRoot, file, destination, warn, ct))
+            if (options.MoveFromStore || _unlocked ? await MoveFromStoreAsync(storeRoot, file, destination, warn, ct) : await CopyFromStoreAsync(storeRoot, file, destination, warn, ct))
             {
                 result.FilesCopied++;
                 result.BytesCopied += file.Length;
@@ -287,7 +316,7 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatf
             foreach (var w in result.Warnings) sb.AppendLine("  - " + w);
         }
 
-        var path = Path.Combine(storeRoot, $"apply-report-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+        var path = Path.Combine(_reportFolder ?? storeRoot, $"apply-report-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
         try
         {
             File.WriteAllText(path, sb.ToString());

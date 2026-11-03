@@ -325,12 +325,20 @@ async Task<int> Run(string[] argv)
     {
         var to = cli.Require("to");
         var options = ReadCaptureOptions();
+        var password = cli.Get("password");
+        var encrypt = cli.Flag("encrypt");
+        if (password is null && encrypt)
+        {
+            password = Menu.ReadSecret("Password for the backup (at least 8 characters)");
+            if (Menu.ReadSecret("Type it again") != password) return Fail("The passwords didn't match.");
+        }
+        if (password is { Length: < 8 }) return Fail("Use a password of at least 8 characters.");
         cli.RejectUnknown();
 
-        if (File.Exists(Path.Combine(to, Manifest.FileName)))
+        if (FolderSink.HasStore(to))
             return Fail($"'{to}' already holds a finished capture. Pick an empty folder.");
 
-        await using var sink = new FolderSink(to);
+        await using var sink = new FolderSink(to, password);
         var manifest = await new CaptureEngine(probe, log, appPlatform).RunAsync(sink, options, cts.Token);
         return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate-cli apply --from \"{sink.Root}\"", manifest.Warnings.Count);
     }
@@ -379,8 +387,11 @@ async Task<int> Run(string[] argv)
         return applyAfter ? await Apply(to, applyOptions) : Done($"Run 'pcmigrate-cli apply --from \"{to}\"' when ready.", 0);
     }
 
-    ApplyOptions ReadApplyOptions()
+    ApplyOptions ReadApplyOptions(string? from = null)
     {
+        var password = cli.Get("password");
+        if (password is null && from is not null && FolderSink.IsProtected(from))
+            password = Menu.ReadSecret("This backup is protected. Password");
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in cli.GetAll("map"))
         {
@@ -404,6 +415,7 @@ async Task<int> Run(string[] argv)
             IncludeWifi = !cli.Flag("no-wifi"),
             IncludeUserSettings = !cli.Flag("no-settings"),
             IncludeApps = !cli.Flag("no-apps"),
+            Password = password,
         };
     }
 
@@ -411,7 +423,7 @@ async Task<int> Run(string[] argv)
     {
         if (options is null)
         {
-            options = ReadApplyOptions();
+            options = ReadApplyOptions(from);
             cli.RejectUnknown();
         }
         log.Info("Tip: close web browsers and Outlook first so their data can be replaced.");
@@ -476,6 +488,10 @@ async Task<int> Run(string[] argv)
                                            Erases the target. --shrink-source shrinks the source's
                                            main partition first when the target is smaller.
               pcmigrate-cli update         Download and install the newest version.
+
+            Password protection (capture to a folder, and apply):
+              --encrypt                    Ask for a password and encrypt the backup with it.
+              --password <password>        The same without asking (for scripts). apply asks if it's needed.
 
             Options for capture and send:
               --user <name>[,<name>]       Only these users (default: everyone).

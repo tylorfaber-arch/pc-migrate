@@ -82,7 +82,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "capture" => await Capture(args, Str(args, "folder"), toNetwork: false),
         "send" => await Capture(args, Str(args, "address"), toNetwork: true),
         "startReceive" => StartReceive(),
-        "readStore" => ReadStore(Str(args, "folder")),
+        "readStore" => await Task.Run(() => ReadStore(Str(args, "folder"), Str(args, "password"))),
         "apply" => await Apply(args),
         "cancel" => Cancel(),
         "openPath" => OpenPath(Str(args, "path")),
@@ -316,7 +316,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         };
         if (dialog.ShowDialog(form) != DialogResult.OK) return null;
         var path = dialog.SelectedPath;
-        var hasStore = File.Exists(Path.Combine(path, Manifest.FileName));
+        var hasStore = FolderSink.HasStore(path);
+        var locked = FolderSink.IsProtected(path);
 
         if (purpose == "save")
         {
@@ -326,12 +327,13 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         }
 
         string? fromComputer = null;
+        if (hasStore && locked) return new { path, hasStore, locked, fromComputer };
         if (hasStore)
         {
             try { fromComputer = FolderSink.ReadManifest(path).Inventory.Machine.ComputerName; }
             catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException) { hasStore = false; }
         }
-        return new { path, hasStore, fromComputer };
+        return new { path, hasStore, locked, fromComputer };
     }
 
     private async Task<object> Capture(JsonElement args, string destination, bool toNetwork)
@@ -368,7 +370,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             }
             else
             {
-                await using var sink = new FolderSink(destination);
+                var password = Str(args, "password");
+                await using var sink = new FolderSink(destination, password.Length > 0 ? password : null);
                 manifest = await Task.Run(() => new CaptureEngine(probe, log, apps).RunAsync(sink, options, ct), ct);
             }
             var bytes = manifest.Files.Sum(f => f.Length);
@@ -445,9 +448,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         return new { code, addresses = NetworkReceiver.LocalAddresses() };
     }
 
-    private object ReadStore(string folder)
+    private object ReadStore(string folder, string password)
     {
-        var manifest = FolderSink.ReadManifest(folder);
+        var manifest = FolderSink.ReadManifest(folder, password.Length > 0 ? password : null);
         var users = manifest.Files
             .Select(f => StorePath.TryParseUserFile(f.StorePath, out var user, out _) ? (user, f.Length) : (user: (string?)null, f.Length))
             .Where(x => x.user is not null)
@@ -491,11 +494,12 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             SkipUsers = skip,
             Conflicts = Str(args, "conflicts") switch { "overwrite" => ConflictMode.Overwrite, "skip" => ConflictMode.Skip, _ => ConflictMode.NewerWins },
             MoveFromStore = args.TryGetProperty("move", out var mv) && mv.ValueKind == JsonValueKind.True,
+            Password = Str(args, "password") is { Length: > 0 } pw ? pw : null,
         };
 
         var folder = Str(args, "folder");
         long total = 0;
-        try { total = FolderSink.ReadManifest(folder).Files.Sum(f => f.Length); } catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException) { }
+        try { total = FolderSink.ReadManifest(folder, options.Password).Files.Sum(f => f.Length); } catch (Exception ex) when (ex is IOException or InvalidDataException or JsonException or StoreLockedException) { }
         var ct = BeginWork();
         using var log = new GuiLog(Post) { OnProgress = (_, bytes) => _notify.Progress(bytes, total) };
         var timer = Stopwatch.StartNew();

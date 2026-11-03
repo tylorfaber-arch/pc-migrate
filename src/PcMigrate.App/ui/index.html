@@ -209,11 +209,11 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: left .15s; }
 .switch:checked { background: var(--accent); }
 .switch:checked::after { left: 21px; }
-select, input[type=text] {
+select, input[type=text], input[type=password] {
   font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 9px; padding: 8px 12px; outline: none; user-select: text;
 }
-select:focus, input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+select:focus, input[type=text]:focus, input[type=password]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .btn {
   font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 11px 22px; cursor: pointer;
   background: var(--accent); color: #fff; transition: filter .12s, transform .05s;
@@ -549,6 +549,14 @@ footer .grow { flex: 1; }
       <div class="folder-pick"><div class="path" id="savePath">No folder chosen</div><button class="btn ghost" id="pickSave">Browse…</button></div>
       <div class="hint" id="saveHint"></div>
     </div>
+    <div class="card">
+      <label class="toggle-row" style="padding-top:0"><input type="checkbox" class="check" id="protect"><div class="grow"><div class="name" style="font-weight:600">Protect it with a password</div>
+        <div class="sub muted" style="font-size:12px">Recommended for someone else's files, or a drive that leaves your hands. Without the password nobody can open the backup, not even you.</div></div></label>
+      <div id="pwBox" style="display:none;margin-top:10px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><input type="password" id="pw1" placeholder="Password" autocomplete="new-password" style="flex:1;min-width:180px"><input type="password" id="pw2" placeholder="Type it again" autocomplete="new-password" style="flex:1;min-width:180px"></div>
+        <div class="hint" id="pwHint">At least 8 characters. Write it down somewhere safe: it can't be recovered.</div>
+      </div>
+    </div>
     <div class="actions"><span class="spacer"></span><button class="btn" id="driveNext" disabled>Next</button></div>
   </section>
 
@@ -609,6 +617,9 @@ footer .grow { flex: 1; }
     <div class="card">
       <div class="folder-pick"><div class="path" id="loadPath">No folder chosen</div><button class="btn ghost" id="pickLoad">Browse…</button></div>
       <div class="hint" id="loadHint"></div>
+      <div id="unlockBox" style="display:none;margin-top:12px">
+        <div style="display:flex;gap:10px"><input type="password" id="loadPw" placeholder="Backup password" style="flex:1"><button class="btn ghost" id="unlockStore">Unlock</button></div>
+      </div>
     </div>
     <div class="actions"><span class="spacer"></span><button class="btn" id="loadNext" disabled>Next</button></div>
   </section>
@@ -1010,11 +1021,27 @@ $("pickSave").addEventListener("click", async () => {
   state.folder = r.path;
   $("savePath").textContent = r.path; $("savePath").classList.add("set");
   const hint = $("saveHint");
-  if (r.hasStore) { hint.textContent = "This folder already holds a finished copy. Pick an empty folder."; hint.className = "hint warn"; $("driveNext").disabled = true; return; }
+  state.folderOk = !r.hasStore;
+  if (r.hasStore) { hint.textContent = "This folder already holds a finished copy. Pick an empty folder."; hint.className = "hint warn"; updateDriveNext(); return; }
   hint.textContent = fmtBytes(r.freeBytes) + " free on this drive"; hint.className = "hint";
-  $("driveNext").disabled = false;
+  updateDriveNext();
 });
-$("driveNext").addEventListener("click", () => { state.flow = "capture"; show("old-what"); });
+function passwordProblem() {
+  if (!$("protect").checked) return null;
+  const a = $("pw1").value, b = $("pw2").value;
+  if (a.length < 8) return "At least 8 characters. Write it down somewhere safe: it can't be recovered.";
+  if (a !== b) return "The two passwords don't match.";
+  return null;
+}
+function updateDriveNext() {
+  const problem = passwordProblem();
+  $("pwHint").textContent = problem || "Good. Write it down somewhere safe: it can't be recovered.";
+  $("pwHint").className = "hint" + (problem && $("pw1").value ? " warn" : "");
+  $("driveNext").disabled = !state.folderOk || !!problem;
+}
+$("protect").addEventListener("change", () => { $("pwBox").style.display = $("protect").checked ? "" : "none"; updateDriveNext(); });
+["pw1", "pw2"].forEach(id => $(id).addEventListener("input", updateDriveNext));
+$("driveNext").addEventListener("click", () => { state.flow = "capture"; state.password = $("protect").checked ? $("pw1").value : ""; show("old-what"); });
 $("whatBack").addEventListener("click", () => show(state.flow === "send" ? "old-find" : state.flow === "here" ? "pulled-method" : "old-drive"));
 
 // ----- old PC: choose people -----
@@ -1103,7 +1130,7 @@ $("startCapture").addEventListener("click", async () => {
     }
     const r = state.flow === "send"
       ? await call("send", { ...args, address: state.target.address, port: state.target.port, code: state.code })
-      : await call("capture", { ...args, folder: state.folder });
+      : await call("capture", { ...args, folder: state.folder, password: state.password || "" });
     showDone({
       title: state.flow === "send" ? "Sent!" : "Saved!",
       sub: state.flow === "send" ? `Everything is on ${state.target.name}. Finish up there.` : "Unplug the drive and plug it into the new PC.",
@@ -1125,7 +1152,7 @@ $("goReceive").addEventListener("click", async () => {
 });
 $("receiveBack").addEventListener("click", () => { call("cancel"); show("new-method"); });
 on("senderConnected", m => startProgress(`Receiving from ${m.name}`, m.estimatedBytes));
-on("received", async m => { state.folder = m.folder; state.move = false; await openStore(m.folder); });
+on("received", async m => { state.folder = m.folder; state.move = false; state.password = ""; await openStore(m.folder); });
 on("failed", m => {
   // Pressing Back while waiting cancels the receive; that is not an error worth a screen.
   if (/cancel/i.test(m.message) && !document.getElementById("s-progress").classList.contains("active")) return;
@@ -1138,15 +1165,34 @@ $("pickLoad").addEventListener("click", async () => {
   if (!r) return;
   $("loadPath").textContent = r.path; $("loadPath").classList.add("set");
   const hint = $("loadHint");
+  $("unlockBox").style.display = "none"; state.password = "";
   if (!r.hasStore) { hint.textContent = "There's no finished copy in this folder. Pick the folder the old PC saved to."; hint.className = "hint warn"; $("loadNext").disabled = true; return; }
+  state.folder = r.path;
+  if (r.locked) {
+    hint.textContent = "This backup is protected with a password."; hint.className = "hint";
+    $("unlockBox").style.display = ""; $("loadPw").value = ""; $("loadPw").focus(); $("loadNext").disabled = true; return;
+  }
   hint.textContent = "Found a copy from " + r.fromComputer; hint.className = "hint";
-  state.folder = r.path; $("loadNext").disabled = false;
+  $("loadNext").disabled = false;
 });
+async function tryUnlock() {
+  const b = $("unlockStore"); b.disabled = true; b.textContent = "Checking…";
+  try {
+    const s = await call("readStore", { folder: state.folder, password: $("loadPw").value });
+    state.password = $("loadPw").value;
+    $("unlockBox").style.display = "none";
+    $("loadHint").textContent = "Unlocked. Found a copy from " + s.fromComputer; $("loadHint").className = "hint";
+    $("loadNext").disabled = false;
+  } catch (e) { $("loadHint").textContent = e.message; $("loadHint").className = "hint warn"; }
+  b.disabled = false; b.textContent = "Unlock";
+}
+$("unlockStore").addEventListener("click", tryUnlock);
+$("loadPw").addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
 $("loadNext").addEventListener("click", () => { state.move = false; openStore(state.folder); });
 
 async function openStore(folder) {
   try {
-    const s = state.store = await call("readStore", { folder });
+    const s = state.store = await call("readStore", { folder, password: state.password || "" });
     $("reviewSub").textContent = `From ${s.fromComputer}, copied ${new Date(s.captured).toLocaleString()}. ${fmtNum(s.files)} files, ${fmtBytes(s.bytes)}.`;
     const opts = name => `<option value="">Don't copy</option>` + s.targetUsers.map(t => `<option ${t.toLowerCase() === name.toLowerCase() ? "selected" : ""}>${esc(t)}</option>`).join("");
     $("mapRows").innerHTML = s.users.map(u => `
@@ -1174,7 +1220,7 @@ $("startApply").addEventListener("click", async () => {
   startProgress("Putting everything in place", state.store.bytes);
   try {
     const apps = [...$("reviewApps").querySelectorAll("input:checked")].map(c => c.dataset.app);
-    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value, move: state.move });
+    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value, move: state.move, password: state.password || "" });
     if (state.captureWarnings) { r.warnings = [...state.captureWarnings, ...r.warnings]; state.captureWarnings = null; }
     showDone({
       title: "Welcome to your new PC",
@@ -1286,7 +1332,7 @@ const Mock = {
         emit("userMeasured", { name: "guest", files: 41, bytes: 3.1e6 }, 400);
         emit("userMeasured", { name: "Admin", files: 310, bytes: 0.4e9 }, 500);
         return reply(null);
-      case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, fromComputer: "TYLOR-DESKTOP" });
+      case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, locked: true });
       case "startReceive": return reply({ code: "482913", addresses: ["192.168.1.42"] });
       case "planApps": return reply(MOCK_APPS, 1600);
       case "checkUpdate": return reply({ version: "0.1.0.61", notes: "", page: "https://github.com/tylorfaber-arch/pc-migrate/releases/latest", sizeBytes: 70e6 }, 800);
@@ -1321,7 +1367,7 @@ const Mock = {
         health: { disk: 1, model: "WDC WD10SPZX-22Z10T1", level: "Failing", summary: "This drive is failing. Copy what matters first and don't run anything else on it.", details: ["The drive's own self-test predicts it will fail soon.", "214 read error(s) the drive couldn't correct: some data may already be unreadable."] },
         users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
       case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
-      case "readStore": return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
+      case "readStore": if (args.password !== undefined && args.password !== "" && args.password !== "correct horse") return setTimeout(() => receive({ id, error: "That password is wrong." }), 300); return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
       case "clone": {
         const total = 214e9; let b = 0;
         const t = setInterval(() => { b += total / 40; receive({ event: "progress", files: 0, bytes: b, path: "C: NTFS" }); if (b >= total) clearInterval(t); }, 120);
