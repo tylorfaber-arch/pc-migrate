@@ -130,6 +130,45 @@ public sealed class WindowsAppPlatform(IMigrationLog log) : IAppPlatform
         }
     }
 
+    public async Task<string?> WingetDownloadAsync(string id, string folder, CancellationToken ct)
+    {
+        // A slow mirror shouldn't hold up the whole capture.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromMinutes(4));
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var result = await ProcessRunner.RunAsync("winget.exe", timeout.Token, "download", "--id", id, "--exact", "--download-directory", folder,
+                "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity");
+            if (result.ExitCode != 0) return null;
+            return Directory.EnumerateFiles(folder)
+                .Where(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".msi", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(f => new FileInfo(f).Length)
+                .FirstOrDefault();
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    // 3010 and 1641 mean "installed, restart needed".
+    private static readonly HashSet<int> InstallerOkCodes = [0, 3010, 1641];
+
+    public async Task<(bool Ok, string Message)> RunInstallerAsync(string file, IReadOnlyList<string> args, CancellationToken ct)
+    {
+        try
+        {
+            var result = file.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)
+                ? await ProcessRunner.RunAsync("msiexec.exe", ct, ["/i", file, .. args])
+                : await ProcessRunner.RunAsync(file, ct, [.. args]);
+            if (InstallerOkCodes.Contains(result.ExitCode)) return (true, result.ExitCode == 0 ? "" : "Restart the PC to finish.");
+            return (false, result.ExitCode == 1602 ? "The installer was cancelled." : $"The installer stopped with code {result.ExitCode}.");
+        }
+        catch (Win32Exception ex)
+        {
+            return (false, $"Couldn't start the installer: {ex.Message}");
+        }
+    }
+
     private static string Explain(ProcessResult result)
     {
         var text = result.Output;

@@ -291,10 +291,11 @@ async Task<int> Run(string[] argv)
             {
                 AppMethod.Reinstall => $"Reinstalled automatically, with settings ({group.Count()}):",
                 AppMethod.Copy => $"Copied as they are ({group.Count()}):",
+                AppMethod.Installer => $"Installed from their saved installer ({group.Count()}):",
                 _ => $"Need installing by hand ({group.Count()}):",
             });
             foreach (var app in group)
-                Console.WriteLine($"  {app.Name}{(app.Version is null ? "" : "  " + app.Version)}{(group.Key == AppMethod.Manual ? "  - " + app.Reason : "")}");
+                Console.WriteLine($"  {app.Name}{(app.Version is null ? "" : "  " + app.Version)}{(group.Key is AppMethod.Manual or AppMethod.Installer ? "  - " + app.Reason : "")}");
         }
         return 0;
     }
@@ -309,7 +310,7 @@ async Task<int> Run(string[] argv)
             var inventory = probe.GetInventory();
             var selected = users.Count == 0 ? inventory.Users : inventory.Users.Where(u => users.Contains(u.UserName, StringComparer.OrdinalIgnoreCase)).ToList();
             apps = AppPlanner.Plan(inventory, appPlatform, selected, new CaptureRules());
-            log.Info($"{apps.Count(a => a.Method == AppMethod.Reinstall)} program(s) will be reinstalled, {apps.Count(a => a.Method == AppMethod.Copy)} copied, {apps.Count(a => a.Method == AppMethod.Manual)} need installing by hand.");
+            log.Info($"{apps.Count(a => a.Method == AppMethod.Reinstall)} program(s) will be reinstalled, {apps.Count(a => a.Method == AppMethod.Copy)} copied, {apps.Count(a => a.Method == AppMethod.Installer)} installed from a saved installer, {apps.Count(a => a.Method == AppMethod.Manual)} need installing by hand.");
         }
         return new CaptureOptions
         {

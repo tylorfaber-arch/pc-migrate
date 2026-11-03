@@ -38,4 +38,11 @@ public interface IAppPlatform
     IReadOnlyList<string> SharedShortcutFolders();
 
     Task<(bool Ok, string Message)> WingetInstallAsync(string id, CancellationToken ct);
+
+    /// <summary>Downloads a winget package's installer into <paramref name="folder"/> without installing it. Returns the file, or null.</summary>
+    Task<string?> WingetDownloadAsync(string id, string folder, CancellationToken ct) => Task.FromResult<string?>(null);
+
+    /// <summary>Runs an installer and waits for it. An .msi goes through Windows Installer.</summary>
+    Task<(bool Ok, string Message)> RunInstallerAsync(string file, IReadOnlyList<string> args, CancellationToken ct) =>
+        Task.FromResult((false, "Installers can't be run here."));
 }

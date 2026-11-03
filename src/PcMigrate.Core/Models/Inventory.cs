@@ -43,6 +43,10 @@ public sealed class InstalledApp
     public required string RegistryKey { get; init; }
     /// <summary>Installed by Windows Installer (an .msi). Those cannot safely be moved by copying.</summary>
     public bool IsMsi { get; init; }
+    /// <summary>Where a "bundle" installer kept a full copy of itself (C:\ProgramData\Package Cache\...).</summary>
+    public string? BundleCachePath { get; init; }
+    /// <summary>The folder an .msi was installed from, if Windows recorded it.</summary>
+    public string? InstallSource { get; init; }
 }
 
 /// <summary>Everything the scanner learned about a machine.</summary>

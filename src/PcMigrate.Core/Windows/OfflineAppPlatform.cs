@@ -117,4 +117,6 @@ public sealed class OfflineAppPlatform(OfflineWindows drive, IMigrationLog log) 
     ];
 
     public Task<(bool Ok, string Message)> WingetInstallAsync(string id, CancellationToken ct) => _here.WingetInstallAsync(id, ct);
+    public Task<string?> WingetDownloadAsync(string id, string folder, CancellationToken ct) => _here.WingetDownloadAsync(id, folder, ct);
+    public Task<(bool Ok, string Message)> RunInstallerAsync(string file, IReadOnlyList<string> args, CancellationToken ct) => _here.RunInstallerAsync(file, args, ct);
 }

@@ -119,6 +119,8 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
                 Is64Bit = is64,
                 RegistryKey = $@"{keyPath}\{name}",
                 IsMsi = key.GetValue("WindowsInstaller") is int msi && msi == 1,
+                BundleCachePath = key.GetValue("BundleCachePath") as string,
+                InstallSource = key.GetValue("InstallSource") as string,
             });
         }
     }

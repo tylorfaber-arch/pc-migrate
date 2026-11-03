@@ -20,6 +20,8 @@ public sealed class Manifest
     public List<string> Warnings { get; init; } = [];
     /// <summary>License keys read from the old PC, also saved as license-keys.txt at the top of the store.</summary>
     public List<Keys.LicenseKey> LicenseKeys { get; init; } = [];
+    /// <summary>Runtimes (Visual C++, .NET, Java) installed on the new PC before the programs.</summary>
+    public List<Apps.RuntimeNeed> Runtimes { get; init; } = [];
     public bool UsedShadowCopy { get; set; }
 }
 

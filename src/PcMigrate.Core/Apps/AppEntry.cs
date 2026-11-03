@@ -9,6 +9,8 @@ public enum AppMethod
     Copy,
     /// <summary>Has to be installed by hand; the reason says why. (Red.)</summary>
     Manual,
+    /// <summary>The program's original installer was found on the old PC; it's saved and run on the new one. (Yellow.)</summary>
+    Installer,
 }
 
 /// <summary>One program: how it will move, and (once captured) where its pieces are in the store.</summary>
@@ -40,6 +42,22 @@ public sealed class AppEntry
     /// <summary>Store folder holding the program folder, for <see cref="AppMethod.Copy"/>.</summary>
     public string? ProgramStorePath { get; set; }
     public List<ShortcutFile> Shortcuts { get; init; } = [];
+
+    /// <summary>For <see cref="AppMethod.Installer"/>: where the installer is on the old PC (as it saw it).</summary>
+    public string? InstallerSource { get; set; }
+    /// <summary>For <see cref="AppMethod.Installer"/>: the saved installer in the store.</summary>
+    public string? InstallerStorePath { get; set; }
+}
+
+/// <summary>A shared runtime (Visual C++, .NET, Java) the old PC's programs relied on.</summary>
+public sealed class RuntimeNeed
+{
+    public required string Name { get; init; }
+    public required string WingetId { get; init; }
+    /// <summary>Switches that install it without questions, for the saved installer.</summary>
+    public required string QuietArgs { get; init; }
+    /// <summary>A copy of its installer downloaded while capturing, for a new PC without internet.</summary>
+    public string? InstallerStorePath { get; set; }
 }
 
 /// <summary>An exported .reg file. UserName is null for machine-wide keys.</summary>
