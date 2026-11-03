@@ -98,6 +98,22 @@ public class DuplicateTests
     public void Spots_names_that_look_like_copies(string path, bool copy) =>
         Assert.Equal(copy, DuplicateFinder.LooksLikeACopy(path));
 
+    [Fact]
+    public void Program_folders_inside_the_search_are_skipped()
+    {
+        using var dir = new TempDir();
+        var data = Bytes(10_000, 6);
+        Write(dir.Path, "Sam/Documents/a.bin", data);
+        Write(dir.Path, "Sam/AppData/Local/Cache/a.bin", data);
+        Write(dir.Path, "Sam/AppData/Local/Cache/b.bin", data);
+
+        // (On Windows the test folder is itself inside AppData\Temp, which counts as picked on purpose.)
+        if (!DuplicateFinder.IsProtected(dir.Path + Path.DirectorySeparatorChar))
+            Assert.Empty(DuplicateFinder.Find([Path.Combine(dir.Path, "Sam")], new DuplicateFinder.Options { MinSize = 1 }));
+        // Picked on purpose, it's searched.
+        Assert.Single(DuplicateFinder.Find([Path.Combine(dir.Path, "Sam", "AppData", "Local", "Cache")], new DuplicateFinder.Options { MinSize = 1 }));
+    }
+
     [Theory]
     [InlineData(@"C:\Windows\System32\a.dll", true)]
     [InlineData(@"C:\Program Files\App\a.dll", true)]
