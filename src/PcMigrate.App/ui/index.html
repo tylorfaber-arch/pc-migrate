@@ -209,11 +209,11 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: left .15s; }
 .switch:checked { background: var(--accent); }
 .switch:checked::after { left: 21px; }
-select, input[type=text], input[type=password] {
+select, input[type=text], input[type=password], input[type=time] {
   font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
   border-radius: 9px; padding: 8px 12px; outline: none; user-select: text;
 }
-select:focus, input[type=text]:focus, input[type=password]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+select:focus, input[type=text]:focus, input[type=password]:focus, input[type=time]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .btn {
   font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 11px 22px; cursor: pointer;
   background: var(--accent); color: #fff; transition: filter .12s, transform .05s;
@@ -403,6 +403,7 @@ footer .grow { flex: 1; }
       <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys</button>
       <button class="btn ghost" data-go="health"><svg><use href="#i-pulse"/></svg>Drive health</button>
       <button class="btn ghost" data-go="rescue"><svg><use href="#i-drive"/></svg>Rescue USB</button>
+      <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
     </div>
   </section>
 
@@ -475,6 +476,36 @@ footer .grow { flex: 1; }
       <div id="healthLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Asking the drives…</div>
     </div>
     <p class="hint">Many USB adapters and enclosures don't pass a drive's health through; those show as unknown. Connecting the drive with a different adapter, or inside a PC, usually works.</p>
+  </section>
+
+  <!-- SCHEDULED BACKUP -->
+  <section class="screen" id="s-schedule">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Scheduled backup</h1><p>Keeps a backup of this PC up to date by itself, even when nobody is signed in. Each time, only new and changed files are copied, so it's quick. The backup can be loaded onto a new PC like any other.</p></div>
+    <div class="card" id="schedStatus" style="display:none">
+      <div class="card-head"><h2>Backing up</h2><span class="spacer"></span><span class="pill" id="schedPill"></span></div>
+      <div class="rows">
+        <div class="row"><div class="grow"><div class="name" id="schedWhen"></div><div class="sub" id="schedWhere"></div></div></div>
+        <div class="row"><div class="grow"><div class="name">Last backup</div><div class="sub" id="schedLast"></div></div></div>
+      </div>
+      <div class="actions" style="margin-top:12px"><button class="btn ghost" id="schedOff">Turn off</button><span class="spacer"></span><button class="btn ghost" id="schedLog">Open log</button><button class="btn" id="schedNow">Back up now</button></div>
+    </div>
+    <div class="card">
+      <h2 id="schedSetupHead">Set it up</h2>
+      <div class="folder-pick"><div class="path" id="schedPath">No folder chosen</div><button class="btn ghost" id="schedPick">Browse…</button></div>
+      <div class="hint">Use a drive that stays plugged in, or one you plug in on backup day. If it isn't there at backup time, it tries again next time.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center">
+        <select id="schedFreq"><option value="daily">Every day</option><option value="weekly">Every week</option></select>
+        <select id="schedDay" style="display:none"><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option></select>
+        <span class="muted">at</span><input type="time" id="schedTime" value="21:00">
+      </div>
+      <label class="toggle-row"><input type="checkbox" class="check" id="schedProtect"><div class="grow"><div class="name" style="font-weight:600">Protect it with a password</div>
+        <div class="sub muted" style="font-size:12px">The password is kept locked to this PC so backups can run on their own. You'll need it to load the backup onto another PC.</div></div></label>
+      <div id="schedPwBox" style="display:none;margin-top:6px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><input type="password" id="schedPw1" placeholder="Password" autocomplete="new-password" style="flex:1;min-width:180px"><input type="password" id="schedPw2" placeholder="Type it again" autocomplete="new-password" style="flex:1;min-width:180px"></div>
+      </div>
+    </div>
+    <div class="actions"><span class="muted" id="schedNote"></span><span class="spacer"></span><button class="btn" id="schedSave" disabled>Turn on</button></div>
   </section>
 
   <!-- RESCUE USB -->
@@ -777,7 +808,7 @@ function fmtTime(s) {
 function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
 
 const state = { info: null, here: null, pulled: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [], move: false };
-const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "rescue": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "rescue": 1, "schedule": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
   // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
@@ -788,6 +819,7 @@ function show(name) {
   if (name === "keys") findKeys();
   if (name === "health") findHealth();
   if (name === "rescue") findSticks();
+  if (name === "schedule") loadSchedule();
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
   $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
@@ -1075,6 +1107,64 @@ $("startClone").addEventListener("click", async () => {
   } catch (e) { showError(e); }
   $("progSub").textContent = "You can keep using the PC while this runs.";
 });
+
+// ----- scheduled backup -----
+let sched = { on: false }, schedFolder = null;
+async function loadSchedule() {
+  try { renderSchedule(await call("scheduleStatus")); } catch (e) { toast(e.message); }
+}
+function renderSchedule(st) {
+  sched = st;
+  $("schedStatus").style.display = st.on ? "" : "none";
+  $("schedSetupHead").textContent = st.on ? "Change it" : "Set it up";
+  $("schedSave").textContent = st.on ? "Save changes" : "Turn on";
+  if (st.on) {
+    $("schedWhen").textContent = st.describe;
+    $("schedWhere").textContent = st.folder + (st.isProtected ? " · password-protected" : "");
+    $("schedLast").textContent = st.running ? "Running now…" : st.lastRun ? `${new Date(st.lastRun).toLocaleString()}: ${st.lastResult || ""}` : "Not yet. It runs at the next scheduled time, or press Back up now.";
+    const pill = $("schedPill");
+    pill.className = "pill " + (st.running ? "" : st.lastOk === false ? "Failing" : st.lastOk ? "Good" : "Unknown");
+    pill.textContent = st.running ? "Running" : st.lastOk === false ? "Last one failed" : st.lastOk ? "OK" : "Waiting";
+    if (!schedFolder) { schedFolder = st.folder; $("schedPath").textContent = st.folder; }
+    $("schedFreq").value = st.frequency; $("schedDay").value = st.day; $("schedTime").value = st.time;
+    $("schedDay").style.display = st.frequency === "weekly" ? "" : "none";
+    $("schedProtect").checked = st.isProtected; $("schedPwBox").style.display = st.isProtected ? "" : "none";
+    $("schedPw1").placeholder = st.isProtected ? "New password (leave empty to keep it)" : "Password";
+  }
+  checkSchedule();
+}
+function checkSchedule() {
+  const protect = $("schedProtect").checked, p1 = $("schedPw1").value, p2 = $("schedPw2").value;
+  let note = "";
+  if (!schedFolder) note = "Pick a folder first.";
+  else if (protect && sched.isProtected && p1 === "" && p2 === "") note = "";
+  else if (protect && p1.length < 8) note = "The password needs at least 8 characters.";
+  else if (protect && p1 !== p2) note = "The passwords don't match.";
+  $("schedNote").textContent = note;
+  $("schedSave").disabled = !!note;
+}
+$("schedPick").addEventListener("click", async () => {
+  try { const r = await call("pickImageFolder"); if (r) { schedFolder = r.path; $("schedPath").textContent = r.path + (r.freeBytes != null ? ` (${fmtBytes(r.freeBytes)} free)` : ""); checkSchedule(); } } catch (e) { toast(e.message); }
+});
+$("schedFreq").addEventListener("change", e => { $("schedDay").style.display = e.target.value === "weekly" ? "" : "none"; });
+$("schedProtect").addEventListener("change", e => { $("schedPwBox").style.display = e.target.checked ? "" : "none"; checkSchedule(); });
+["schedPw1", "schedPw2"].forEach(id => $(id).addEventListener("input", checkSchedule));
+$("schedSave").addEventListener("click", async () => {
+  const b = $("schedSave"); b.disabled = true;
+  try {
+    renderSchedule(await call("scheduleSave", { folder: schedFolder, frequency: $("schedFreq").value, day: $("schedDay").value, time: $("schedTime").value,
+      protect: $("schedProtect").checked, password: $("schedProtect").checked ? $("schedPw1").value : "" }));
+    toast("Scheduled backup is on.");
+  } catch (e) { toast(e.message); checkSchedule(); }
+});
+$("schedOff").addEventListener("click", async () => {
+  if (!confirm("Stop the scheduled backups? The backups already made stay where they are.")) return;
+  try { schedFolder = null; $("schedPath").textContent = "No folder chosen"; renderSchedule(await call("scheduleOff")); } catch (e) { toast(e.message); }
+});
+$("schedNow").addEventListener("click", async () => {
+  try { renderSchedule(await call("scheduleRunNow")); toast("The backup started. It runs in the background; you can close pc-migrate."); } catch (e) { toast(e.message); }
+});
+$("schedLog").addEventListener("click", () => sched.logPath && call("openPath", { path: sched.logPath }).catch(e => toast(e.message)));
 
 // ----- rescue USB -----
 let sticks = [], stick = null;
@@ -1522,6 +1612,12 @@ const Mock = {
         users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
       case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
       case "readStore": if (args.password !== undefined && args.password !== "" && args.password !== "correct horse") return setTimeout(() => receive({ id, error: "That password is wrong." }), 300); return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
+      case "scheduleStatus": return reply(Mock.sched || { on: false });
+      case "scheduleSave": Mock.sched = { on: true, folder: args.folder, describe: args.frequency === "weekly" ? `Every ${args.day} at ${args.time}` : `Every day at ${args.time}`, frequency: args.frequency, time: args.time, day: args.day, isProtected: !!args.password,
+          lastRun: new Date(Date.now() - 864e5).toISOString(), lastOk: true, lastResult: "Backed up 48,211 files (61.4 GB); 12 deleted from the PC were removed, 0 warning(s).", running: false, logPath: "C:\\ProgramData\\pc-migrate\\backup.log" };
+        return reply(Mock.sched, 600);
+      case "scheduleOff": Mock.sched = null; return reply({ on: false });
+      case "scheduleRunNow": return reply({ ...Mock.sched, running: true });
       case "listSticks": return reply([
         { number: 3, model: "SanDisk Ultra 32GB", size: 32e9, bus: "USB", isSystem: false, used: 4e9, letters: ["F:"], hasWindows: false, problem: null },
         { number: 4, model: "Generic Card Reader", size: 512e6, bus: "USB", isSystem: false, used: 0, letters: [], hasWindows: false, problem: "The stick is too small; it needs at least 1 GB." }], 600);

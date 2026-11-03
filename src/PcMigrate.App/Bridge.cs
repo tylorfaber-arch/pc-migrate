@@ -70,6 +70,10 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "planClone" => await Task.Run(() => PlanClone(Int(args, "from", -1), Int(args, "to", -1)).View),
         "shrinkSource" => await Task.Run(() => ShrinkSource(Int(args, "from", -1), Int(args, "to", -1))),
         "clone" => await Clone(Int(args, "from", -1), Int(args, "to", -1)),
+        "scheduleStatus" => await Task.Run(ScheduleStatus),
+        "scheduleSave" => await ScheduleSave(args),
+        "scheduleOff" => await Task.Run(() => { BackupScheduler.Disable(); return ScheduleStatus(); }),
+        "scheduleRunNow" => await Task.Run(() => { BackupScheduler.RunNow(); return ScheduleStatus(); }),
         "listSticks" => await Task.Run(ListSticks),
         "makeRescueUsb" => await MakeRescueUsb(Int(args, "disk", -1)),
         "pickImageFolder" => PickImageFolder(),
@@ -175,6 +179,40 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         {
             EndWork();
         }
+    }
+
+    // ----- scheduled backups -----
+
+    private static object ScheduleStatus()
+    {
+        var s = BackupScheduler.Load();
+        if (s is null) return new { on = false };
+        return new
+        {
+            on = true, folder = s.Folder, describe = s.Describe(), frequency = s.Frequency, time = s.Time, day = s.Day.ToString(),
+            isProtected = s.ProtectedPassword is not null,
+            lastRun = s.LastRun?.ToString("o"), lastOk = s.LastOk, lastResult = s.LastResult,
+            running = BackupScheduler.IsRunning(), logPath = BackupScheduler.LogPath,
+        };
+    }
+
+    private async Task<object> ScheduleSave(JsonElement args)
+    {
+        var settings = new PcMigrate.Core.Schedule.ScheduleSettings
+        {
+            Folder = Str(args, "folder"), Frequency = Str(args, "frequency"), Time = Str(args, "time"),
+            Day = Enum.TryParse<DayOfWeek>(Str(args, "day"), true, out var d) ? d : DayOfWeek.Monday,
+        };
+        if (settings.Problem() is { } problem) throw new InvalidOperationException(problem);
+        var password = Str(args, "password") is { Length: > 0 } p ? p : null;
+        // Ticked with the boxes left empty: keep the password it already has.
+        if (password is null && args.TryGetProperty("protect", out var keep) && keep.ValueKind == JsonValueKind.True && BackupScheduler.Load() is { } existing)
+            password = BackupScheduler.Password(existing);
+        if (password is { Length: < 8 }) throw new InvalidOperationException("Use a password of at least 8 characters.");
+        var download = Path.Combine(BackupScheduler.Home, "download");
+        var cli = await CliTool.FindOrDownloadAsync(ExePath, download, NullLog.Instance, CancellationToken.None);
+        await Task.Run(() => BackupScheduler.Enable(settings, password, cli));
+        return ScheduleStatus();
     }
 
     // ----- rescue USB -----

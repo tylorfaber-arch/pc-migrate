@@ -27,19 +27,8 @@ public sealed class RescueUsbMaker(IMigrationLog log)
     /// </summary>
     public static async Task<List<string>> ToolFilesAsync(string runningExe, string downloadFolder, IMigrationLog log, CancellationToken ct)
     {
-        var files = new List<string> { runningExe };
-        if (Path.GetFileName(runningExe).Equals(RescueMedia.CliName, StringComparison.OrdinalIgnoreCase)) return files;
-        var beside = Path.Combine(Path.GetDirectoryName(runningExe)!, RescueMedia.CliName);
-        if (File.Exists(beside)) return [beside, runningExe];
-
-        log.Info("Downloading pcmigrate-cli.exe from the newest release...");
-        var release = await Update.Updater.CheckAsync(RescueMedia.CliName, new Version(0, 0, 0, 0), ct)
-            ?? throw new InvalidOperationException($"Couldn't download {RescueMedia.CliName} (no internet?). Put it in the same folder as pc-migrate.exe and try again.");
-        Directory.CreateDirectory(downloadFolder);
-        var target = Path.Combine(downloadFolder, RescueMedia.CliName);
-        var downloaded = await Update.Updater.DownloadAsync(release, target, null, ct);
-        File.Move(downloaded, target, overwrite: true);
-        return [target, runningExe];
+        var cli = await Update.CliTool.FindOrDownloadAsync(runningExe, downloadFolder, log, ct);
+        return cli == runningExe ? [cli] : [cli, runningExe];
     }
 
     /// <summary>Why this disk can't become a rescue USB, or null if it can.</summary>

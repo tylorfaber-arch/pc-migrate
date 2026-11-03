@@ -6,6 +6,7 @@ using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
 using PcMigrate.Core.Clone;
 using PcMigrate.Core.Models;
+using PcMigrate.Core.Schedule;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
 using PcMigrate.Core.Update;
@@ -107,6 +108,8 @@ async Task<int> Run(string[] argv)
             "image" => await MakeImage(),
             "restore-image" => await RestoreImage(),
             "rescue-usb" => await RescueUsb(),
+            "backup" => await Backup(),
+            "schedule" => await ScheduleBackup(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
             "capture" => await Capture(),
@@ -416,6 +419,102 @@ async Task<int> Run(string[] argv)
         return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate-cli apply --from \"{sink.Root}\"", manifest.Warnings.Count);
     }
 
+    /// <summary>Brings a backup folder up to date: only new and changed files are copied.</summary>
+    async Task<int> Backup()
+    {
+        var scheduled = cli.Flag("scheduled");
+        var settings = scheduled ? BackupScheduler.Load() : null;
+        if (scheduled && settings is null) return Fail("No scheduled backup is set up. Use: pcmigrate-cli schedule --to <folder>");
+        var to = settings?.Folder ?? cli.Require("to");
+        var password = settings is not null ? BackupScheduler.Password(settings) : cli.Get("password");
+        if (!scheduled && password is null && cli.Flag("encrypt"))
+        {
+            password = Menu.ReadSecret("Password for the backup (at least 8 characters)");
+            if (Menu.ReadSecret("Type it again") != password) return Fail("The passwords didn't match.");
+        }
+        if (password is { Length: < 8 }) return Fail("Use a password of at least 8 characters.");
+        cli.RejectUnknown();
+
+        int Record(bool ok, string result, int code)
+        {
+            if (settings is null) return code;
+            settings.LastRun = DateTime.Now;
+            settings.LastOk = ok;
+            settings.LastResult = result;
+            BackupScheduler.SaveSettings(settings);
+            return code;
+        }
+
+        var root = Path.GetPathRoot(Path.GetFullPath(to));
+        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+            return Record(false, $"The backup drive ({root}) wasn't plugged in.", Fail($"{root} isn't there. Plug in the backup drive."));
+
+        try
+        {
+            log.Info($"Bringing the backup in {to} up to date...");
+            await using var sink = FolderSink.OpenForUpdate(to, password);
+            var manifest = await new CaptureEngine(probe, log, appPlatform).RunAsync(sink, new CaptureOptions { Apps = [] }, cts.Token);
+            var bytes = manifest.Files.Sum(f => f.Length);
+            var message = $"Backed up {manifest.Files.Count:N0} files ({CaptureEngine.FormatBytes(bytes)}){(sink.Removed > 0 ? $"; {sink.Removed:N0} deleted from the PC were removed" : "")}, {manifest.Warnings.Count} warning(s).";
+            return Record(true, message, Done(message, manifest.Warnings.Count));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && scheduled)
+        {
+            Record(false, ex.Message, 1);
+            throw;
+        }
+    }
+
+    async Task<int> ScheduleBackup()
+    {
+        var to = cli.Get("to");
+        var off = cli.Flag("off");
+        var now = cli.Flag("now");
+        var every = (cli.Get("every") ?? "daily").ToLowerInvariant();
+        var at = cli.Get("at") ?? "21:00";
+        var day = cli.Get("day");
+        var encrypt = cli.Flag("encrypt");
+        cli.RejectUnknown();
+
+        if (off)
+        {
+            BackupScheduler.Disable();
+            return Done("Scheduled backups are off. The backups already made are still there.", 0);
+        }
+        if (now)
+        {
+            BackupScheduler.RunNow();
+            return Done($"The backup started in the background. Check on it with 'pcmigrate-cli schedule' or in {BackupScheduler.LogPath}.", 0);
+        }
+        if (to is null)
+        {
+            var current = BackupScheduler.Load();
+            if (current is null) { Console.WriteLine("No scheduled backup. Set one up with: pcmigrate-cli schedule --to E:\\Backups [--every daily|weekly] [--at 21:00] [--day monday] [--encrypt]"); return 0; }
+            Console.WriteLine($"Backs up to:  {current.Folder}{(current.ProtectedPassword is null ? "" : " (password-protected)")}");
+            Console.WriteLine($"When:         {current.Describe()}");
+            Console.WriteLine($"Last backup:  {(current.LastRun is { } t ? $"{t:g}: {current.LastResult}" : "not yet")}");
+            Console.WriteLine($"Log:          {BackupScheduler.LogPath}");
+            return 0;
+        }
+
+        var settings = new ScheduleSettings
+        {
+            Folder = Path.GetFullPath(to), Frequency = every, Time = at,
+            Day = day is null ? DayOfWeek.Monday : Enum.TryParse<DayOfWeek>(day, ignoreCase: true, out var d) ? d : throw new ArgumentException("--day takes a day name, like monday."),
+        };
+        if (settings.Problem() is { } problem) return Fail(problem);
+        string? password = null;
+        if (encrypt)
+        {
+            password = Menu.ReadSecret("Password for the backups (at least 8 characters)");
+            if (password.Length < 8) return Fail("Use a password of at least 8 characters.");
+            if (Menu.ReadSecret("Type it again") != password) return Fail("The passwords didn't match.");
+        }
+        var cliExe = await CliTool.FindOrDownloadAsync(exePath, Path.Combine(Path.GetTempPath(), "pcmigrate-cli-download"), log, cts.Token);
+        BackupScheduler.Enable(settings, password, cliExe);
+        return Done($"Scheduled: {settings.Describe()}, to {settings.Folder}. Only new and changed files are copied each time. Run now with: pcmigrate-cli schedule --now", 0);
+    }
+
     async Task<int> Send()
     {
         var host = cli.Require("host");
@@ -568,6 +667,12 @@ async Task<int> Run(string[] argv)
               pcmigrate-cli rescue-usb --disk <n> [--yes]
                                            Make a USB stick that starts a PC whose Windows won't start,
                                            straight into pc-migrate. Erases the stick.
+              pcmigrate-cli backup --to <folder> [--encrypt]
+                                           Bring a backup up to date: only new and changed files are copied,
+                                           and files deleted from the PC are removed from it.
+              pcmigrate-cli schedule --to <folder> [--every daily|weekly] [--at 21:00] [--day monday] [--encrypt]
+                                           Back up automatically in the background. 'schedule' alone shows
+                                           the last result; --now runs it straight away; --off turns it off.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):
