@@ -402,6 +402,7 @@ footer .grow { flex: 1; }
     <div class="tools"><span class="label">Tools</span>
       <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys</button>
       <button class="btn ghost" data-go="health"><svg><use href="#i-pulse"/></svg>Drive health</button>
+      <button class="btn ghost" data-go="rescue"><svg><use href="#i-drive"/></svg>Rescue USB</button>
     </div>
   </section>
 
@@ -474,6 +475,23 @@ footer .grow { flex: 1; }
       <div id="healthLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Asking the drives…</div>
     </div>
     <p class="hint">Many USB adapters and enclosures don't pass a drive's health through; those show as unknown. Connecting the drive with a different adapter, or inside a PC, usually works.</p>
+  </section>
+
+  <!-- RESCUE USB -->
+  <section class="screen" id="s-rescue">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Make a rescue USB</h1><p>For a PC whose Windows won't start: plug the stick in, start the PC from it, and pc-migrate opens so its files can be saved. Built from this PC's own Windows, so it works with Secure Boot.</p></div>
+    <div class="card">
+      <div class="card-head"><h2>USB stick <span class="faint" style="font-weight:400;font-size:13px">(everything on it will be erased)</span></h2><span class="spacer"></span><button class="btn ghost" id="refreshSticks">Look again</button></div>
+      <div class="rows" id="stickRows"></div>
+      <div id="sticksLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for USB sticks…</div>
+    </div>
+    <div class="erase-box" id="rescueErase" style="display:none">
+      <div><b>Everything on <span id="rescueEraseName"></span> will be erased.</b> This can't be undone. Type <b>ERASE</b> to confirm.</div>
+      <input type="text" id="rescueEraseInput" autocomplete="off" spellcheck="false" placeholder="ERASE">
+    </div>
+    <p class="hint">A stick of 8 GB or more also gets room to save backups on. To start a PC from it, tap the boot menu key while it turns on (F12 on most PCs, F9 on HP, F8 on ASUS) and pick the stick.</p>
+    <div class="actions"><span class="spacer"></span><button class="btn" id="makeRescue" disabled>Make the rescue USB</button></div>
   </section>
 
   <!-- LICENSE KEYS -->
@@ -759,7 +777,7 @@ function fmtTime(s) {
 function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
 
 const state = { info: null, here: null, pulled: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [], move: false };
-const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "rescue": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
   // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
@@ -769,6 +787,7 @@ function show(name) {
   if (name === "clone") findDisks();
   if (name === "keys") findKeys();
   if (name === "health") findHealth();
+  if (name === "rescue") findSticks();
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
   $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
@@ -1052,6 +1071,41 @@ $("startClone").addEventListener("click", async () => {
       sub: `${p.target.model} is a working copy of ${p.source.model}. To use it, swap it into the PC and start up.`,
       stats: [["Copied", fmtBytes(r.bytes)], ["Time", fmtTime(r.seconds)], ["New drive", fmtBytes(p.target.size)]],
       warnings: [...state.warnings, ...(r.notes || [])], logPath: r.logPath,
+    });
+  } catch (e) { showError(e); }
+  $("progSub").textContent = "You can keep using the PC while this runs.";
+});
+
+// ----- rescue USB -----
+let sticks = [], stick = null;
+async function findSticks() {
+  stick = null; $("stickRows").innerHTML = ""; $("sticksLooking").style.display = "flex";
+  try { sticks = await call("listSticks"); } catch (e) { sticks = []; toast(e.message); }
+  $("sticksLooking").style.display = "none";
+  renderSticks();
+}
+function renderSticks() {
+  $("stickRows").innerHTML = sticks.length ? sticks.map(d => diskRow(d, stick === d.number, d.problem)).join("")
+    : `<p class="muted" style="padding:6px 0">No USB sticks found. Plug one in (1 GB or bigger), wait a few seconds, then press <b>Look again</b>.</p>`;
+  $("stickRows").querySelectorAll(".disk-row:not(.off)").forEach(el => el.addEventListener("click", () => { stick = +el.dataset.n; renderSticks(); }));
+  const d = sticks.find(x => x.number === stick);
+  $("rescueErase").style.display = d ? "" : "none";
+  if (d) $("rescueEraseName").textContent = `${d.model} (${fmtBytes(d.size)})`;
+  $("rescueEraseInput").value = ""; $("makeRescue").disabled = true;
+}
+$("refreshSticks").addEventListener("click", findSticks);
+$("rescueEraseInput").addEventListener("input", e => { $("makeRescue").disabled = !(stick != null && e.target.value.trim() === "ERASE"); });
+$("makeRescue").addEventListener("click", async () => {
+  const d = sticks.find(x => x.number === stick);
+  startProgress("Making the rescue USB", 0, { files: false });
+  $("progSub").textContent = "This takes about 5 to 10 minutes. Leave the stick plugged in.";
+  try {
+    const r = await call("makeRescueUsb", { disk: stick });
+    showDone({
+      title: "Rescue USB ready",
+      sub: `${d.model} now starts a PC straight into pc-migrate. Choose 6 in its menu to save the PC's files.`,
+      stats: [["Boot part", r.boot], ["Backups go on", r.data || "another drive"], ["Stick", fmtBytes(d.size)]],
+      warnings: [...state.warnings, ...(r.notes || []).filter(n => !/^To use it/.test(n))], logPath: r.logPath,
     });
   } catch (e) { showError(e); }
   $("progSub").textContent = "You can keep using the PC while this runs.";
@@ -1468,6 +1522,11 @@ const Mock = {
         users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
       case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
       case "readStore": if (args.password !== undefined && args.password !== "" && args.password !== "correct horse") return setTimeout(() => receive({ id, error: "That password is wrong." }), 300); return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
+      case "listSticks": return reply([
+        { number: 3, model: "SanDisk Ultra 32GB", size: 32e9, bus: "USB", isSystem: false, used: 4e9, letters: ["F:"], hasWindows: false, problem: null },
+        { number: 4, model: "Generic Card Reader", size: 512e6, bus: "USB", isSystem: false, used: 0, letters: [], hasWindows: false, problem: "The stick is too small; it needs at least 1 GB." }], 600);
+      case "makeRescueUsb": emit("log", { message: "Setting it up to open pc-migrate..." }, 400);
+        return reply({ boot: "R:\\", data: "S:\\", notes: ["To use it: plug it into the PC, turn it on while tapping the boot menu key (F12 on most PCs, F9 on HP) and pick the USB stick."], logPath: "C:\\ProgramData\\pc-migrate\\rescue-usb.log" }, 3000);
       case "pickImageFolder": return reply({ path: "E:\\Images", freeBytes: 640e9 });
       case "pickImageFile": return reply({ path: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 212e9 });
       case "planImage": return reply({ canRun: true, problem: null, file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytesToCopy: 214e9,

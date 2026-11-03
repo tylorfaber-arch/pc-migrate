@@ -106,6 +106,7 @@ async Task<int> Run(string[] argv)
             "clone" => await CloneDisk(),
             "image" => await MakeImage(),
             "restore-image" => await RestoreImage(),
+            "rescue-usb" => await RescueUsb(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
             "capture" => await Capture(),
@@ -232,6 +233,34 @@ async Task<int> Run(string[] argv)
         var result = await image.RestoreAsync(from, to, cts.Token);
         foreach (var note in result.Notes) log.Warn(note);
         return Done($"Restored {CaptureEngine.FormatBytes(result.BytesCopied)} in {result.Elapsed:h\\:mm\\:ss}. Put the drive in the PC and start it up.", result.Notes.Count);
+    }
+
+    async Task<int> RescueUsb()
+    {
+        var number = cli.GetInt("disk", -1);
+        var yes = cli.Flag("yes");
+        cli.RejectUnknown();
+        var sticks = Disks.List().Where(d => d.Bus is "USB" or "SD card" && !d.IsSystem).ToList();
+        if (number < 0)
+        {
+            foreach (var d in sticks) Console.WriteLine($"  {d.Describe()}");
+            return Fail(sticks.Count == 0 ? "No USB sticks found. Plug one in (1 GB or bigger)." : "Say which stick: --disk <number>.");
+        }
+        var disk = sticks.FirstOrDefault(d => d.Number == number) ?? throw new ArgumentException($"Disk {number} isn't a USB stick.");
+        if (RescueUsbMaker.Check(disk) is { } problem) return Fail(problem);
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine($"Everything on {disk.Describe()} will be erased.");
+        Console.ResetColor();
+        if (!yes)
+        {
+            Console.Write($"Type ERASE {number} to go ahead: ");
+            if (!string.Equals(Console.ReadLine()?.Trim(), $"ERASE {number}", StringComparison.OrdinalIgnoreCase)) return Fail("Not confirmed; nothing was changed.");
+        }
+        var download = Path.Combine(Path.GetTempPath(), "pcmigrate-rescue-tools");
+        var tools = await RescueUsbMaker.ToolFilesAsync(exePath, download, log, cts.Token);
+        var result = await new RescueUsbMaker(log).MakeAsync(disk, tools, cts.Token);
+        foreach (var note in result.Notes) log.Info(note);
+        return Done($"Rescue USB ready ({result.BootDrive}{(result.DataDrive is null ? "" : ", backups go on " + result.DataDrive)}).", 0);
     }
 
     async Task<int> SelfUpdate()
@@ -536,6 +565,9 @@ async Task<int> Run(string[] argv)
                                            Double-click the file in Explorer to open it and copy files out.
               pcmigrate-cli restore-image --from <file.vhdx> --to <n> [--yes]
                                            Put an image back onto a disk so it starts up. Erases the disk.
+              pcmigrate-cli rescue-usb --disk <n> [--yes]
+                                           Make a USB stick that starts a PC whose Windows won't start,
+                                           straight into pc-migrate. Erases the stick.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):

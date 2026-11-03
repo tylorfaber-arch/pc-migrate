@@ -19,6 +19,7 @@ internal static class Menu
         Console.WriteLine("  7. Clone a whole drive onto another (erases the target)");
         Console.WriteLine("  8. Show license keys (Windows, Office, programs)");
         Console.WriteLine("  9. Save a whole drive as an image file, or put one back");
+        Console.WriteLine("  R. Make a rescue USB (starts a PC whose Windows won't start)");
         Console.WriteLine("  0. Show all commands");
         Console.WriteLine();
 
@@ -98,6 +99,14 @@ internal static class Menu
                 }
                 case "0":
                     return ["help"];
+                case "r" or "R":
+                {
+                    Console.WriteLine();
+                    foreach (var disk in Disks.List().Where(d => d.Bus is "USB" or "SD card" && !d.IsSystem))
+                        Console.WriteLine($"  {disk.Describe()}");
+                    var number = PromptRequired("Number of the USB stick to use (it will be erased)");
+                    return ["rescue-usb", "--disk", number];
+                }
                 case "u" or "U":
                     return ["update"];
                 default:

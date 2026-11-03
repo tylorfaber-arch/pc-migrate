@@ -70,6 +70,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "planClone" => await Task.Run(() => PlanClone(Int(args, "from", -1), Int(args, "to", -1)).View),
         "shrinkSource" => await Task.Run(() => ShrinkSource(Int(args, "from", -1), Int(args, "to", -1))),
         "clone" => await Clone(Int(args, "from", -1), Int(args, "to", -1)),
+        "listSticks" => await Task.Run(ListSticks),
+        "makeRescueUsb" => await MakeRescueUsb(Int(args, "disk", -1)),
         "pickImageFolder" => PickImageFolder(),
         "pickImageFile" => PickImageFile(),
         "planImage" => await Task.Run(() => PlanImage(Int(args, "from", -1), Str(args, "folder"))),
@@ -167,6 +169,42 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _notify.Failed("Clone stopped", Friendly(ex), logPath);
+            throw;
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    // ----- rescue USB -----
+
+    private static List<object> ListSticks() =>
+        Disks.List().Where(d => d.Bus is "USB" or "SD card" && !d.IsSystem).Select(d => (object)new
+        {
+            number = d.Number, model = d.Model, size = d.Size, bus = d.Bus, isSystem = false, used = d.Partitions.Sum(p => p.UsedBytes ?? 0),
+            letters = d.Partitions.Where(p => p.DriveLetter is not null).Select(p => p.DriveLetter + ":"), hasWindows = false,
+            problem = RescueUsbMaker.Check(d),
+        }).ToList();
+
+    private async Task<object> MakeRescueUsb(int number)
+    {
+        var disk = await Task.Run(() => Disks.List().FirstOrDefault(d => d.Number == number)) ?? throw new InvalidOperationException("Pick the USB stick.");
+        if (RescueUsbMaker.Check(disk) is { } problem) throw new InvalidOperationException(problem);
+        var ct = BeginWork();
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"rescue-usb-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        using var log = new GuiLog(Post, logPath);
+        try
+        {
+            var download = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", "rescue-tools");
+            var tools = await RescueUsbMaker.ToolFilesAsync(ExePath, download, log, ct);
+            var result = await Task.Run(() => new RescueUsbMaker(log).MakeAsync(disk, tools, ct), ct);
+            _notify.Finished("Rescue USB ready", $"{disk.Model} now starts PCs into pc-migrate.", logPath);
+            return new { boot = result.BootDrive, data = result.DataDrive, notes = result.Notes, logPath };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Rescue USB stopped", Friendly(ex), logPath);
             throw;
         }
         finally
