@@ -113,6 +113,7 @@ async Task<int> Run(string[] argv)
             "tech" => Technician(),
             "undelete" => Undelete(),
             "duplicates" => Duplicates(),
+            "wipe" => await WipeCommand(),
             "schedule" => await ScheduleBackup(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
@@ -503,6 +504,49 @@ async Task<int> Run(string[] argv)
         return Done($"Moved {result.Removed:N0} extra copies to the Recycle Bin, freeing {CaptureEngine.FormatBytes(result.Freed)} once it's emptied.", result.Problems.Count);
     }
 
+    async Task<int> WipeCommand()
+    {
+        var diskArg = cli.Get("disk");
+        var files = cli.GetAll("file").ToList();
+        var free = cli.Get("free-space");
+        var passes = cli.Get("passes") == "3" ? PcMigrate.Core.Cleanup.WipePasses.Three : PcMigrate.Core.Cleanup.WipePasses.One;
+        var blank = cli.Flag("leave-blank");
+        var yes = cli.Flag("yes");
+        cli.RejectUnknown();
+        if ((diskArg is null ? 0 : 1) + (files.Count > 0 ? 1 : 0) + (free is null ? 0 : 1) != 1)
+            return Fail("Say what to wipe: --disk <n>, --file <path> (files or folders, repeatable), or --free-space E:");
+        bool Confirm(string question)
+        {
+            if (yes) return true;
+            Console.Write($"{question} This can't be undone. Type ERASE to go ahead: ");
+            return Console.ReadLine()?.Trim() == "ERASE";
+        }
+        var wiper = new DiskWiper(log);
+        if (diskArg is not null)
+        {
+            if (!int.TryParse(diskArg, out var number)) return Fail("--disk takes a disk number (see pcmigrate-cli disks).");
+            var disk = Disks.List().FirstOrDefault(d => d.Number == number);
+            if (disk is null) return Fail($"There's no disk {number}. Run pcmigrate-cli disks.");
+            if (PcMigrate.Core.Cleanup.Wipe.CheckDisk(disk) is { } problem) return Fail(problem);
+            Console.WriteLine(disk.Describe());
+            foreach (var p in disk.Partitions.Where(p => p.DriveLetter is not null)) Console.WriteLine($"  {p.DriveLetter}: {p.FileSystem} {CaptureEngine.FormatBytes(p.Length)}");
+            if (PcMigrate.Core.Cleanup.Wipe.Note(disk) is { } note) log.Warn(note);
+            if (!Confirm($"Everything on disk {number} will be overwritten.")) return Fail("Nothing was wiped.");
+            var r = await wiper.WipeDiskAsync(number, passes, !blank, "Wiped", cts.Token);
+            return Done($"Disk {number} is wiped ({CaptureEngine.FormatBytes(disk.Size)}, checked).{(r.NewLetter is { } l ? $" It's now an empty drive {l}:." : "")}", 0);
+        }
+        if (free is not null)
+        {
+            await wiper.WipeFreeSpaceAsync(free, cts.Token);
+            return Done($"The free space on {free.TrimEnd('\\')} is wiped; deleted files there can't be recovered now.", 0);
+        }
+        foreach (var f in files) Console.WriteLine($"  {f}");
+        if (!Confirm($"These {files.Count} file(s)/folder(s) will be overwritten and deleted.")) return Fail("Nothing was wiped.");
+        var result = PcMigrate.Core.Cleanup.Wipe.Files(files, passes, null, cts.Token);
+        foreach (var p in result.Problems) log.Warn(p);
+        return Done($"Wiped {result.Files:N0} file(s) ({CaptureEngine.FormatBytes(result.Bytes)}).", result.Problems.Count);
+    }
+
     int Technician()
     {
         var off = cli.Flag("off");
@@ -803,6 +847,10 @@ async Task<int> Run(string[] argv)
               pcmigrate-cli duplicates [--in <folder>]... [--min-mb 1] [--remove] [--yes]
                                            Find files that are exactly the same (default: everyone's folders).
                                            --remove moves the extra copies to the Recycle Bin, keeping one.
+              pcmigrate-cli wipe --disk <n> | --file <path>... | --free-space E: [--passes 3] [--yes]
+                                           Overwrite so nothing can be recovered: a whole drive (then left as
+                                           one empty drive, or --leave-blank), files and folders, or a drive's
+                                           free space (wipes what was deleted before).
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):

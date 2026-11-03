@@ -76,6 +76,11 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "deletedList" => DeletedList(Str(args, "query"), args.TryGetProperty("goodOnly", out var go) && go.ValueKind == JsonValueKind.True),
         "recoverDeleted" => await RecoverDeleted(args),
         "dupFolders" => DupFolders(),
+        "wipeCheck" => await Task.Run(() => WipeCheck(Int(args, "disk", -1))),
+        "wipeDisk" => await WipeDisk(args),
+        "wipeFiles" => await WipeFiles(args),
+        "wipeFree" => await WipeFree(Str(args, "letter")),
+        "pickFiles" => PickFiles(),
         "scanDuplicates" => await ScanDuplicates(args),
         "removeDuplicates" => await RemoveDuplicates(args),
         "techSettings" => TechView(TechnicianStore.Load()),
@@ -352,6 +357,87 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         {
             EndWork();
         }
+    }
+
+    // ----- secure wipe -----
+
+    private static PcMigrate.Core.Cleanup.WipePasses Passes(JsonElement args) =>
+        Int(args, "passes", 1) == 3 ? PcMigrate.Core.Cleanup.WipePasses.Three : PcMigrate.Core.Cleanup.WipePasses.One;
+
+    private static object WipeCheck(int number)
+    {
+        var disk = Disks.List().FirstOrDefault(d => d.Number == number) ?? throw new InvalidOperationException("Pick the drive to wipe.");
+        return new { problem = PcMigrate.Core.Cleanup.Wipe.CheckDisk(disk), note = PcMigrate.Core.Cleanup.Wipe.Note(disk) };
+    }
+
+    private async Task<object> WipeDisk(JsonElement args)
+    {
+        var number = Int(args, "disk", -1);
+        var passes = Passes(args);
+        var disk = await Task.Run(() => Disks.List().FirstOrDefault(d => d.Number == number)) ?? throw new InvalidOperationException("Pick the drive to wipe.");
+        if (PcMigrate.Core.Cleanup.Wipe.CheckDisk(disk) is { } problem) throw new InvalidOperationException(problem);
+        var total = disk.Size * (int)passes;
+        var ct = BeginWork();
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"wipe-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        using var log = new GuiLog(Post, logPath) { OnProgress = (_, bytes) => _notify.Progress(bytes, total) };
+        try
+        {
+            var blank = args.TryGetProperty("blank", out var b) && b.ValueKind == JsonValueKind.True;
+            var result = await new DiskWiper(log).WipeDiskAsync(number, passes, !blank, "Wiped", ct);
+            _notify.Finished("Drive wiped", $"{disk.Model} has been overwritten and checked.", logPath);
+            return new { letter = result.NewLetter, bytes = result.Bytes, seconds = (int)result.Elapsed.TotalSeconds, notes = result.Notes, logPath };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Wipe stopped", Friendly(ex), logPath);
+            throw;
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    private async Task<object> WipeFiles(JsonElement args)
+    {
+        var paths = args.TryGetProperty("paths", out var p) && p.ValueKind == JsonValueKind.Array
+            ? p.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
+        if (paths.Count == 0) throw new InvalidOperationException("Add the files or folders to wipe.");
+        var ct = BeginWork();
+        using var log = new GuiLog(Post);
+        try
+        {
+            var result = await Task.Run(() => PcMigrate.Core.Cleanup.Wipe.Files(paths, Passes(args),
+                new Progress<(int Files, long Bytes, string Path)>(x => log.FileProgress(x.Files, x.Bytes, x.Path)), ct), ct);
+            return new { files = result.Files, bytes = result.Bytes, problems = result.Problems.Take(200) };
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    private async Task<object> WipeFree(string letter)
+    {
+        if (letter.Length == 0) throw new InvalidOperationException("Pick a drive.");
+        var ct = BeginWork();
+        using var log = new GuiLog(Post);
+        try
+        {
+            await new DiskWiper(log).WipeFreeSpaceAsync(letter, ct);
+            _notify.Finished("Free space wiped", $"Deleted files on {letter}: can't be recovered now.", null);
+            return new { letter };
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    private object? PickFiles()
+    {
+        using var dialog = new OpenFileDialog { Title = "Choose files to wipe", Multiselect = true, CheckFileExists = true };
+        return dialog.ShowDialog(form) == DialogResult.OK ? dialog.FileNames : null;
     }
 
     // ----- technician mode -----
