@@ -172,6 +172,13 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .del-list .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .del-list .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .del-list .grow { min-width: 0; }
+.dup-group { padding: 10px 4px; border-bottom: 1px solid var(--line); }
+.dup-group:last-child { border-bottom: 0; }
+.dup-group .head { display: flex; gap: 8px; align-items: baseline; font-weight: 600; margin-bottom: 4px; }
+.dup-copy { display: flex; gap: 10px; align-items: center; padding: 4px 0; cursor: pointer; }
+.dup-copy .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-size: 13px; }
+.folder-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.folder-row .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill.Poor { background: var(--warn-soft); color: var(--warn); }
 .drive-row .lock { display: flex; gap: 10px; margin-top: 10px; }
 .drive-row .lock input { flex: 1; font-family: ui-monospace, Consolas, monospace; letter-spacing: .02em; }
@@ -361,6 +368,7 @@ footer .grow { flex: 1; }
     <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></symbol>
     <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
     <symbol id="i-pc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/></symbol>
     <symbol id="logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="url(#grad)"/><path d="M9 13h12m0 0-3.5-3.5M21 13l-3.5 3.5M23 19H11m0 0 3.5-3.5M11 19l3.5 3.5" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </defs>
@@ -414,6 +422,7 @@ footer .grow { flex: 1; }
       <button class="btn ghost" data-go="rescue"><svg><use href="#i-drive"/></svg>Rescue USB</button>
       <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
       <button class="btn ghost" data-go="undelete"><svg><use href="#i-hdd"/></svg>Get deleted files back</button>
+      <button class="btn ghost" data-go="dups"><svg><use href="#i-folder"/></svg>Duplicate files</button>
       <button class="btn ghost" data-go="tech"><svg><use href="#i-key"/></svg>Technician mode</button>
     </div>
   </section>
@@ -578,6 +587,24 @@ footer .grow { flex: 1; }
         <button class="btn ghost" id="pickUndelOut">Choose…</button></div>
     </div>
     <div class="actions"><span class="muted" id="undelNote"></span><span class="spacer"></span><button class="btn" id="undelScan" disabled>Search for deleted files</button><button class="btn" id="undelGo" style="display:none" disabled>Recover</button></div>
+  </section>
+
+  <!-- DUPLICATE FILES -->
+  <section class="screen" id="s-dups">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Duplicate files</h1><p>Finds files that are exactly the same inside, whatever they're called, so the extra copies can go. Removed copies go to the Recycle Bin, and one copy of each is always kept.</p></div>
+    <div class="card" id="dupSetup">
+      <div class="card-head"><h2>Folders to search</h2><span class="spacer"></span><button class="btn ghost" id="dupAdd">Add a folder…</button></div>
+      <div id="dupFolders"></div>
+      <div class="toggle-row" style="gap:10px"><div class="grow">Ignore files smaller than</div>
+        <select id="dupMin"><option value="0.1">100 KB</option><option value="1" selected>1 MB</option><option value="10">10 MB</option><option value="100">100 MB</option></select></div>
+    </div>
+    <div class="card" id="dupResults" style="display:none">
+      <div class="card-head"><h2 id="dupHead"></h2><span class="spacer"></span><button class="btn ghost" id="dupAgain">Search again</button></div>
+      <p class="muted" id="dupSub" style="margin:0 0 6px"></p>
+      <div class="del-list" id="dupList"></div>
+    </div>
+    <div class="actions"><span class="muted" id="dupNote"></span><span class="spacer"></span><button class="btn" id="dupScan">Search</button><button class="btn" id="dupGo" style="display:none" disabled>Remove</button></div>
   </section>
 
   <!-- LICENSE KEYS -->
@@ -887,6 +914,7 @@ function show(name) {
   if (name === "schedule") loadSchedule();
   if (name === "tech") loadTech();
   if (name === "undelete") loadVolumes();
+  if (name === "dups") loadDupFolders();
   if (name === "old-what" || name === "new-review") document.querySelectorAll(".job-card").forEach(c => c.style.display = tech.enabled ? "" : "none");
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
@@ -1391,6 +1419,70 @@ $("undelGo").addEventListener("click", async () => {
   } catch (e) { showError(e); }
 });
 
+// ----- duplicate files -----
+let dupFolders = null, dups = null, dupPicked = new Set();
+async function loadDupFolders() {
+  dupMode(!!dups);
+  if (dupFolders) return renderDupFolders();
+  try { dupFolders = await call("dupFolders"); } catch (e) { dupFolders = []; toast(e.message); }
+  renderDupFolders();
+}
+function dupMode(results) {
+  $("dupSetup").style.display = results ? "none" : "";
+  $("dupResults").style.display = results ? "" : "none";
+  $("dupScan").style.display = results ? "none" : "";
+  $("dupGo").style.display = results ? "" : "none";
+  $("dupNote").textContent = "";
+}
+function renderDupFolders() {
+  $("dupFolders").innerHTML = dupFolders.length ? dupFolders.map((f, i) => `<div class="folder-row"><svg width="18" height="18"><use href="#i-folder"/></svg><span class="p">${esc(f)}</span><button class="btn ghost" data-rm="${i}" style="padding:4px 10px">Remove</button></div>`).join("")
+    : `<p class="muted" style="padding:6px 0">No folders yet. Press <b>Add a folder</b>.</p>`;
+  $("dupFolders").querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", () => { dupFolders.splice(+b.dataset.rm, 1); renderDupFolders(); }));
+  $("dupScan").disabled = !dupFolders.length;
+}
+$("dupAdd").addEventListener("click", async () => {
+  try { const r = await call("pickImageFolder", { title: "Choose a folder to search for duplicates" }); if (r && !dupFolders.includes(r.path)) { dupFolders.push(r.path); renderDupFolders(); } } catch (e) { toast(e.message); }
+});
+$("dupAgain").addEventListener("click", () => { dups = null; dupMode(false); renderDupFolders(); });
+$("dupScan").addEventListener("click", async () => {
+  startProgress("Looking for duplicate files", 0, { stats: false });
+  $("progSub").textContent = "Files are only read when another file is the same size, so this is quicker than it sounds.";
+  try {
+    dups = await call("scanDuplicates", { folders: dupFolders, minMb: +$("dupMin").value });
+    dupPicked = new Set(dups.list.flatMap(g => g.copies.slice(1).map(c => c.path)));
+    renderDups(); show("dups");
+  } catch (e) { showError(e); }
+  $("progSub").textContent = "You can keep using the PC while this runs.";
+});
+function renderDups() {
+  dupMode(true);
+  $("dupHead").textContent = dups.groups ? `${fmtNum(dups.groups)} ${dups.groups === 1 ? "file has" : "files have"} copies` : "No duplicates found";
+  $("dupSub").textContent = dups.groups ? `Removing the extra copies frees ${fmtBytes(dups.wasted)}. The ticked ones go; the copy marked Keep was picked as the original (oldest, not in Downloads, not named like a copy).${dups.list.length < dups.groups ? ` The ${dups.list.length} biggest are shown.` : ""}` : "Every file in those folders is the only one of its kind.";
+  $("dupList").innerHTML = dups.list.map(g => `<div class="dup-group">
+      <div class="head"><span>${esc(g.copies[0].path.split("\\").pop())}</span><span class="faint" style="font-weight:400">${fmtBytes(g.size)} × ${g.copies.length}</span></div>
+      ${g.copies.map((c, k) => `<label class="dup-copy"><input type="checkbox" class="check" data-p="${esc(c.path)}" ${dupPicked.has(c.path) ? "checked" : ""}><span class="p" title="${esc(c.path)}">&lrm;${esc(c.path)}</span>${k === 0 ? '<span class="pill ok">Keep</span>' : ""}</label>`).join("")}
+    </div>`).join("");
+  $("dupList").querySelectorAll("input[data-p]").forEach(el => el.addEventListener("change", () => { el.checked ? dupPicked.add(el.dataset.p) : dupPicked.delete(el.dataset.p); updateDupGo(); }));
+  updateDupGo();
+}
+function updateDupGo() {
+  let n = 0, bytes = 0, whole = 0;
+  for (const g of dups.list) { const k = g.copies.filter(c => dupPicked.has(c.path)).length; n += k; bytes += k * g.size; if (k === g.copies.length) whole++; }
+  $("dupGo").disabled = !n;
+  $("dupGo").textContent = n ? `Remove ${fmtNum(n)} (${fmtBytes(bytes)})` : "Remove";
+  $("dupNote").textContent = whole ? `${whole} ${whole === 1 ? "file has" : "files have"} every copy ticked; one of each will be kept anyway.` : "";
+}
+$("dupGo").addEventListener("click", async () => {
+  if (!confirm(`Move ${fmtNum(dupPicked.size)} copies to the Recycle Bin?`)) return;
+  startProgress("Removing the extra copies", 0, { stats: false });
+  try {
+    const r = await call("removeDuplicates", { paths: [...dupPicked] });
+    dups = null;
+    showDone({ title: "Extra copies removed", sub: "They're in the Recycle Bin, so anything removed by mistake can be put back from there. Empty it to get the space.",
+      stats: [["Removed", fmtNum(r.removed)], ["Space", fmtBytes(r.freed)], ["Left alone", fmtNum((r.problems || []).length)]], warnings: r.problems || [] });
+  } catch (e) { showError(e); }
+});
+
 function leaveDrive() {
   state.pulled = null; state.info = state.here; state.sizes = {}; appPlans = null;
   $("pcLabel").textContent = "This PC"; $("pcName").textContent = state.here.computerName;
@@ -1832,6 +1924,16 @@ const Mock = {
         return reply({ total: all.length, bytes: all.reduce((a, f) => a + f.size, 0), files: all }, 200);
       }
       case "recoverDeleted": return reply({ recovered: args.ids ? args.ids.length : 5, failed: 0, bytes: 9.1e6, problems: [], folder: "F:\\Recovered\\Recovered from E 2026-11-03 1412" }, 2000);
+      case "dupFolders": return reply(["C:\\Users\\tylor", "C:\\Users\\Sam"], 100);
+      case "scanDuplicates": {
+        const g = (name, size, paths) => ({ size, wasted: size * (paths.length - 1), copies: paths.map((p, k) => ({ path: p + "\\" + name, modified: new Date(Date.now() - (5 - k) * 864e5 * 90).toISOString() })) });
+        const list = [g("Wedding.mp4", 2.1e9, ["C:\\Users\\Sam\\Videos", "C:\\Users\\Sam\\Desktop", "C:\\Users\\Sam\\Downloads"]),
+          g("Family photos.zip", 840e6, ["C:\\Users\\tylor\\Documents\\Backups", "C:\\Users\\tylor\\Downloads"]),
+          g("IMG_2041.JPG", 4.1e6, ["C:\\Users\\Sam\\Pictures\\2026\\June", "C:\\Users\\Sam\\OneDrive\\Pictures\\Camera Roll"])];
+        emit("progress", { files: 12000, bytes: 0, path: "C:\\Users\\Sam\\Pictures\\2026\\June\\IMG_2041.JPG" }, 400);
+        return reply({ groups: list.length, wasted: list.reduce((a, x) => a + x.wasted, 0), list }, 1800);
+      }
+      case "removeDuplicates": return reply({ removed: args.paths.length, freed: 5.0e9, problems: [] }, 1200);
       case "pickImageFolder": return reply({ path: "E:\\Images", freeBytes: 640e9 });
       case "pickImageFile": return reply({ path: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 212e9 });
       case "planImage": return reply({ canRun: true, problem: null, file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytesToCopy: 214e9,

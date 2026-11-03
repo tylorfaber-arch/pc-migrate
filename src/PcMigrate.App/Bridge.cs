@@ -75,6 +75,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "scanDeleted" => await ScanDeleted(Str(args, "letter")),
         "deletedList" => DeletedList(Str(args, "query"), args.TryGetProperty("goodOnly", out var go) && go.ValueKind == JsonValueKind.True),
         "recoverDeleted" => await RecoverDeleted(args),
+        "dupFolders" => DupFolders(),
+        "scanDuplicates" => await ScanDuplicates(args),
+        "removeDuplicates" => await RemoveDuplicates(args),
         "techSettings" => TechView(TechnicianStore.Load()),
         "techSave" => TechSave(args),
         "scheduleStatus" => await Task.Run(ScheduleStatus),
@@ -83,7 +86,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "scheduleRunNow" => await Task.Run(() => { BackupScheduler.RunNow(); return ScheduleStatus(); }),
         "listSticks" => await Task.Run(ListSticks),
         "makeRescueUsb" => await MakeRescueUsb(Int(args, "disk", -1)),
-        "pickImageFolder" => PickImageFolder(),
+        "pickImageFolder" => PickImageFolder(Str(args, "title")),
         "pickImageFile" => PickImageFile(),
         "planImage" => await Task.Run(() => PlanImage(Int(args, "from", -1), Str(args, "folder"))),
         "makeImage" => await MakeImage(Int(args, "from", -1), Str(args, "folder")),
@@ -282,6 +285,75 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         }
     }
 
+    // ----- duplicate files -----
+
+    private List<PcMigrate.Core.Cleanup.DuplicateGroup> _dups = [];
+
+    /// <summary>Everyone's own folders on this PC: where duplicates usually pile up.</summary>
+    private static List<string> DupFolders()
+    {
+        var users = Path.Combine(Path.GetPathRoot(Environment.SystemDirectory)!, "Users");
+        if (!Directory.Exists(users)) return [];
+        return Directory.GetDirectories(users)
+            .Where(d => Path.GetFileName(d) is var n && !n.Equals("Public", StringComparison.OrdinalIgnoreCase) && !n.Equals("All Users", StringComparison.OrdinalIgnoreCase)
+                        && !n.StartsWith("Default", StringComparison.OrdinalIgnoreCase) && (File.GetAttributes(d) & FileAttributes.ReparsePoint) == 0)
+            .ToList();
+    }
+
+    private async Task<object> ScanDuplicates(JsonElement args)
+    {
+        var folders = args.TryGetProperty("folders", out var f) && f.ValueKind == JsonValueKind.Array
+            ? f.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : [];
+        if (folders.Count == 0) throw new InvalidOperationException("Pick at least one folder to search.");
+        var minMb = args.TryGetProperty("minMb", out var m) && m.ValueKind == JsonValueKind.Number ? m.GetDouble() : 1;
+        var ct = BeginWork();
+        using var log = new GuiLog(Post);
+        try
+        {
+            _dups = [];
+            log.Info("Listing files...");
+            var options = new PcMigrate.Core.Cleanup.DuplicateFinder.Options { MinSize = (long)(minMb * 1024 * 1024) };
+            var found = await Task.Run(() => PcMigrate.Core.Cleanup.DuplicateFinder.Find(folders, options,
+                new Progress<(int Files, string Path)>(p => log.FileProgress(p.Files, 0, p.Path)), ct), ct);
+            _dups = found;
+            return new
+            {
+                groups = found.Count,
+                wasted = found.Sum(g => g.Wasted),
+                list = found.Take(400).Select((g, i) => new
+                {
+                    i, size = g.Size, wasted = g.Wasted,
+                    copies = g.Copies.Select(c => new { path = c.Path, modified = c.Modified.ToString("o") }),
+                }),
+            };
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    private async Task<object> RemoveDuplicates(JsonElement args)
+    {
+        if (_dups.Count == 0) throw new InvalidOperationException("Search for duplicates first.");
+        var paths = args.TryGetProperty("paths", out var p) && p.ValueKind == JsonValueKind.Array
+            ? p.EnumerateArray().Select(x => x.GetString() ?? "").ToHashSet(StringComparer.OrdinalIgnoreCase) : [];
+        if (paths.Count == 0) throw new InvalidOperationException("Tick the copies to remove.");
+        var ct = BeginWork();
+        try
+        {
+            var result = await Task.Run(() => PcMigrate.Core.Cleanup.DuplicateFinder.Remove(_dups, paths, RecycleBin.Send, ct), ct);
+            // The removed copies are gone from the list; the search can be shown again as it now is.
+            foreach (var g in _dups) g.Copies.RemoveAll(c => paths.Contains(c.Path) && !File.Exists(c.Path));
+            _dups.RemoveAll(g => g.Copies.Count < 2);
+            return new { removed = result.Removed, freed = result.Freed, problems = result.Problems.Take(200) };
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
     // ----- technician mode -----
 
     private static JobInfo? JobFrom(JsonElement args) =>
@@ -377,9 +449,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
 
     // ----- disk images -----
 
-    private object? PickImageFolder()
+    private object? PickImageFolder(string title)
     {
-        using var dialog = new FolderBrowserDialog { Description = "Choose where to save the image (on a different drive)", UseDescriptionForTitle = true, ShowNewFolderButton = true };
+        using var dialog = new FolderBrowserDialog { Description = title.Length > 0 ? title : "Choose where to save the image (on a different drive)", UseDescriptionForTitle = true, ShowNewFolderButton = true };
         if (dialog.ShowDialog(form) != DialogResult.OK) return null;
         long? free = null;
         try { free = new DriveInfo(Path.GetPathRoot(dialog.SelectedPath)!).AvailableFreeSpace; } catch (Exception ex) when (ex is IOException or ArgumentException) { }
