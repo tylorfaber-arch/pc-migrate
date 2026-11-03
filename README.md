@@ -114,15 +114,19 @@ own setup accounts (`defaultuser0`, `defaultuser100000`) are ignored.
 
 ## How programs move
 
-Every program in *Apps & features* gets one of three badges:
+Every program in *Apps & features* gets one of four badges:
 
 | Badge | What happens | Which programs |
 |---|---|---|
 | 🟢 **Reinstall + settings** | The new PC installs a fresh copy with **winget** (Windows' own app installer), then the program's settings folders (AppData) and registry settings from the old PC are copied in | Anything winget knows: Chrome, Spotify, Discord, Steam, VS Code, VLC, Zoom, Notepad++ and thousands more |
 | 🟡 **Copy as is** | The program folder, its registry entries, its Start menu and desktop shortcuts and its settings are copied | Programs winget doesn't have that were installed by simply unpacking files |
-| 🔴 **Do by hand** | Listed on the finish screen with the reason | Drivers, antivirus, Office/Microsoft 365, Steam games (reinstall from your library; saves come with your files), Windows Installer (.msi) programs winget doesn't have, and anything that runs a Windows service |
+| 🟡 **Saved installer** | The program's original installer was found on the old PC. It's saved with the backup and run on the new PC, then the settings are copied in. An .msi installs with just a progress bar; other installers open normally so you can click through them | Programs winget doesn't have whose installer is still on the old PC: the copy Windows keeps in *Package Cache*, the folder an .msi was installed from, or a matching file in someone's Downloads folder |
+| 🔴 **Do by hand** | Listed on the finish screen with the reason | Drivers, antivirus, Office/Microsoft 365, Steam games (reinstall from your library; saves come with your files), and programs winget doesn't have whose installer couldn't be found (.msi installs, or anything that runs a Windows service) |
 
-Runtimes and parts of Windows (Visual C++ redistributables, .NET, Edge, WebView2) are left out of the list.
+**Shared runtimes.** Visual C++ redistributables, .NET and Java aren't listed as programs, but older
+programs won't start without them. pc-migrate notes every one the old PC had and, before installing
+any programs, puts the missing ones on the new PC with winget. While saving, it also downloads a copy
+of each runtime's installer into the backup, so a new PC with no internet still gets them.
 A program that's already installed on the new PC just gets its settings.
 
 Known limits: a few installers (Spotify is one) refuse to run from an administrator program, so

@@ -144,6 +144,26 @@ internal sealed class FakeApps : IAppPlatform
         Installed.Add(id);
         return Task.FromResult((true, ""));
     }
+
+    /// <summary>Installers run, with the file's contents (so tests can tell which one) and its switches.</summary>
+    public List<(string Content, string Args)> RanInstallers { get; } = [];
+    /// <summary>winget packages that "download": id to file contents.</summary>
+    public Dictionary<string, string> Downloads { get; } = [];
+
+    public Task<string?> WingetDownloadAsync(string id, string folder, CancellationToken ct)
+    {
+        if (!Downloads.TryGetValue(id, out var content)) return Task.FromResult<string?>(null);
+        Directory.CreateDirectory(folder);
+        var file = Path.Combine(folder, id + ".exe");
+        File.WriteAllText(file, content);
+        return Task.FromResult<string?>(file);
+    }
+
+    public Task<(bool Ok, string Message)> RunInstallerAsync(string file, IReadOnlyList<string> args, CancellationToken ct)
+    {
+        RanInstallers.Add((File.ReadAllText(file), string.Join(' ', args)));
+        return Task.FromResult((!FailInstalls, FailInstalls ? "boom" : ""));
+    }
 }
 
 public class AppPlannerAndMoveTests

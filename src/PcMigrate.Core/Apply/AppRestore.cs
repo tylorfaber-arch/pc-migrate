@@ -16,6 +16,9 @@ internal sealed class AppRestore(IAppPlatform? platform, IMigrationLog log, Acti
             .Where(a => a.Method != AppMethod.Manual && (options.AppKeys is null || options.AppKeys.Contains(a.Key)))
             .ToList();
 
+        // Programs fail to start without these, so they go first.
+        results.AddRange(await InstallRuntimesAsync(storeRoot, manifest, target, options, ct));
+
         var i = 0;
         foreach (var app in chosen)
         {
@@ -24,11 +27,12 @@ internal sealed class AppRestore(IAppPlatform? platform, IMigrationLog log, Acti
             var already = installed.Contains(AppNames.Normalize(app.Name));
             log.Info(already ? $"{app.Name} is already installed; copying its settings ({i} of {chosen.Count})..."
                 : app.Method == AppMethod.Reinstall ? $"Installing {app.Name} ({i} of {chosen.Count})..."
+                : app.Method == AppMethod.Installer ? $"Running the saved installer for {app.Name} ({i} of {chosen.Count})..."
                 : $"Copying {app.Name} ({i} of {chosen.Count})...");
 
             if (options.DryRun)
             {
-                results.Add(new AppResult { Name = app.Name, Outcome = already ? AppOutcome.AlreadyInstalled : app.Method == AppMethod.Reinstall ? AppOutcome.Installed : AppOutcome.Copied, Message = "Dry run" });
+                results.Add(new AppResult { Name = app.Name, Outcome = already ? AppOutcome.AlreadyInstalled : app.Method is AppMethod.Reinstall or AppMethod.Installer ? AppOutcome.Installed : AppOutcome.Copied, Message = "Dry run" });
                 continue;
             }
 
@@ -37,6 +41,8 @@ internal sealed class AppRestore(IAppPlatform? platform, IMigrationLog log, Acti
                 result = new AppResult { Name = app.Name, Outcome = AppOutcome.AlreadyInstalled, Message = "Already on this PC, so only its settings were copied." };
             else if (app.Method == AppMethod.Reinstall)
                 result = await InstallAsync(app, ct);
+            else if (app.Method == AppMethod.Installer)
+                result = await RunSavedInstallerAsync(storeRoot, app, ct);
             else
                 result = await CopyProgramAsync(storeRoot, manifest, app, findTarget, ct);
 
@@ -60,6 +66,62 @@ internal sealed class AppRestore(IAppPlatform? platform, IMigrationLog log, Acti
             return new AppResult { Name = app.Name, Outcome = AppOutcome.Failed, Message = "Can't install programs on this PC." };
         var (ok, message) = await platform.WingetInstallAsync(app.WingetId, ct);
         return new AppResult { Name = app.Name, Outcome = ok ? AppOutcome.Installed : AppOutcome.Failed, Message = ok ? "Installed fresh, with your settings." : message };
+    }
+
+    private async Task<AppResult> RunSavedInstallerAsync(string storeRoot, AppEntry app, CancellationToken ct)
+    {
+        if (platform is null || app.InstallerStorePath is null)
+            return new AppResult { Name = app.Name, Outcome = AppOutcome.Failed, Message = "Its installer wasn't saved on the old PC." };
+        var file = StorePath.ToLocal(storeRoot, app.InstallerStorePath);
+        if (!File.Exists(file))
+            return new AppResult { Name = app.Name, Outcome = AppOutcome.Failed, Message = "Its saved installer is missing from the backup." };
+        var args = InstallerArgs(file, app.InstallerSource);
+        if (args.Count == 0) log.Info($"The {app.Name} installer may ask a few questions; answer them and it carries on.");
+        var (ok, message) = await platform.RunInstallerAsync(file, args, ct);
+        return new AppResult
+        {
+            Name = app.Name,
+            Outcome = ok ? AppOutcome.Installed : AppOutcome.Failed,
+            Message = ok ? $"Installed from its original installer, with your settings.{(message.Length > 0 ? " " + message : "")}" : message,
+        };
+    }
+
+    /// <summary>
+    /// Switches for a saved program installer. An .msi and the bundles kept in Package Cache all
+    /// understand /passive (progress bar, no questions); any other installer has its own switches,
+    /// so it runs normally and the person clicks through it.
+    /// </summary>
+    internal static IReadOnlyList<string> InstallerArgs(string file, string? foundAt)
+    {
+        if (file.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) return ["/passive", "/norestart"];
+        if (foundAt?.Contains(@"\Package Cache\", StringComparison.OrdinalIgnoreCase) == true) return ["/passive", "/norestart"];
+        return [];
+    }
+
+    private async Task<List<AppResult>> InstallRuntimesAsync(string storeRoot, Manifest manifest, Inventory target, ApplyOptions options, CancellationToken ct)
+    {
+        var results = new List<AppResult>();
+        var have = Runtimes.On(target.Apps).Select(r => r.WingetId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var missing = manifest.Runtimes.Where(r => !have.Contains(r.WingetId)).ToList();
+        if (missing.Count == 0) return results;
+        log.Info($"Installing {missing.Count} shared runtime(s) the old PC's programs used...");
+        foreach (var runtime in missing)
+        {
+            ct.ThrowIfCancellationRequested();
+            log.Info($"Installing {runtime.Name}...");
+            if (options.DryRun || platform is null)
+            {
+                results.Add(new AppResult { Name = runtime.Name, Outcome = options.DryRun ? AppOutcome.Installed : AppOutcome.Failed, Message = options.DryRun ? "Dry run" : "Can't install programs on this PC." });
+                continue;
+            }
+            var (ok, message) = await platform.WingetInstallAsync(runtime.WingetId, ct);
+            // No internet or no winget: use the copy saved with the backup.
+            if (!ok && runtime.InstallerStorePath is { } saved && File.Exists(StorePath.ToLocal(storeRoot, saved)))
+                (ok, message) = await platform.RunInstallerAsync(StorePath.ToLocal(storeRoot, saved), runtime.QuietArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries), ct);
+            if (!ok) warn($"{runtime.Name}: {message}");
+            results.Add(new AppResult { Name = runtime.Name, Outcome = ok ? AppOutcome.Installed : AppOutcome.Failed, Message = ok ? "Shared runtime, installed so older programs start." : message });
+        }
+        return results;
     }
 
     private async Task<AppResult> CopyProgramAsync(string storeRoot, Manifest manifest, AppEntry app,

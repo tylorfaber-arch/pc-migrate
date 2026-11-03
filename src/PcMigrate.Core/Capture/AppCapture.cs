@@ -31,6 +31,7 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
                 {
                     await CaptureRegistryAsync(app, users, temp, addFile);
                     if (app.Method == AppMethod.Copy) await CaptureProgramAsync(app, temp, mapPath, addFile);
+                    if (app.Method == AppMethod.Installer) await CaptureInstallerAsync(app, addFile);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
                 {
@@ -38,6 +39,8 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
                 }
                 manifest.Apps.Add(app);
             }
+
+            await CaptureRuntimesAsync(manifest, temp, addFile, ct);
         }
         finally
         {
@@ -77,6 +80,49 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
             if (await addFile(file, storePath, DateTime.UtcNow))
                 app.RegistryFiles.Add(new RegistryFile { StorePath = storePath });
         }
+    }
+
+    private async Task CaptureInstallerAsync(AppEntry app, AddFileFn addFile)
+    {
+        var source = app.InstallerSource;
+        var storePath = source is null ? null : StorePath.Combine("files", "apps", app.Key, "installer", SafeName(Path.GetFileName(source)));
+        if (source is not null && storePath is not null && await addFile(source, storePath, File.GetLastWriteTimeUtc(source)))
+        {
+            app.InstallerStorePath = storePath;
+            log.Info($"Saved the installer for {app.Name} ({Path.GetFileName(source)}).");
+            return;
+        }
+        // Without the installer it's back to being installed by hand.
+        app.Method = AppMethod.Manual;
+        app.Reason = $"Its installer ({Path.GetFileName(source)}) couldn't be saved. Get it from the maker's website.";
+    }
+
+    /// <summary>
+    /// Notes the shared runtimes (Visual C++, .NET, Java) the old PC had, and saves a copy of each
+    /// one's installer when winget can fetch it, so a new PC without internet still gets them.
+    /// </summary>
+    private async Task CaptureRuntimesAsync(Manifest manifest, string temp, AddFileFn addFile, CancellationToken ct)
+    {
+        var runtimes = Runtimes.On(manifest.Inventory.Apps);
+        if (runtimes.Count == 0) return;
+        log.Info($"Saving {runtimes.Count} shared runtime(s) the programs rely on...");
+        foreach (var runtime in runtimes)
+        {
+            ct.ThrowIfCancellationRequested();
+            manifest.Runtimes.Add(runtime);
+            if (platform is null) continue;
+            var folder = Path.Combine(temp, "runtime-" + SafeName(runtime.WingetId));
+            var file = await platform.WingetDownloadAsync(runtime.WingetId, folder, ct);
+            if (file is null) continue; // the new PC will get it from winget instead
+            var storePath = StorePath.Combine("files", "runtimes", SafeName(runtime.WingetId), SafeName(Path.GetFileName(file)));
+            if (await addFile(file, storePath, DateTime.UtcNow)) runtime.InstallerStorePath = storePath;
+        }
+    }
+
+    private static string SafeName(string name)
+    {
+        var clean = new string(name.Select(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ' ' or '+' ? c : '_').ToArray()).Trim(' ', '.');
+        return clean.Length == 0 ? "installer" : clean;
     }
 
     private async Task CaptureProgramAsync(AppEntry app, string temp, Func<string, string> mapPath, AddFileFn addFile)

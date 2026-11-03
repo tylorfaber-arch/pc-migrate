@@ -311,6 +311,7 @@ summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
 .badge-m { flex: none; font-size: 11px; font-weight: 650; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .badge-m.Reinstall { background: var(--ok-soft); color: var(--ok); }
 .badge-m.Copy { background: var(--warn-soft); color: var(--warn); }
+.badge-m.Installer { background: var(--warn-soft); color: var(--warn); }
 .badge-m.Manual { background: #fde8e8; color: var(--bad); }
 @media (prefers-color-scheme: dark) { .badge-m.Manual { background: #3a1d1f; } }
 .app-list { max-height: 330px; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
@@ -1045,7 +1046,8 @@ $("driveNext").addEventListener("click", () => { state.flow = "capture"; state.p
 $("whatBack").addEventListener("click", () => show(state.flow === "send" ? "old-find" : state.flow === "here" ? "pulled-method" : "old-drive"));
 
 // ----- old PC: choose people -----
-const METHOD_LABEL = { Reinstall: "Reinstall + settings", Copy: "Copy as is", Manual: "Do by hand" };
+const METHOD_LABEL = { Reinstall: "Reinstall + settings", Installer: "Saved installer", Copy: "Copy as is", Manual: "Do by hand" };
+const METHOD_SUB = { Reinstall: "Fresh install on the new PC, with your settings", Installer: "Its original installer is saved and run on the new PC", Copy: "Program folder and settings copied" };
 const badge = m => `<span class="badge-m ${m}">${METHOD_LABEL[m]}</span>`;
 let appPlans = null;
 function loadApps() {
@@ -1065,9 +1067,9 @@ function renderApps() {
   $("appsLoading").style.display = "none";
   const movable = appPlans.filter(a => a.method !== "Manual"), manual = appPlans.filter(a => a.method === "Manual");
   const count = m => appPlans.filter(a => a.method === m).length;
-  $("appLegend").innerHTML = ["Reinstall", "Copy", "Manual"].filter(count).map(m => `<span class="badge-m ${m}">${count(m)} ${METHOD_LABEL[m].toLowerCase()}</span>`).join("");
+  $("appLegend").innerHTML = ["Reinstall", "Copy", "Installer", "Manual"].filter(count).map(m => `<span class="badge-m ${m}">${count(m)} ${METHOD_LABEL[m].toLowerCase()}</span>`).join("");
   $("appRows").innerHTML = movable.length
-    ? movable.map(a => appRow(a, { sub: (a.publisher ? a.publisher + " · " : "") + (a.method === "Reinstall" ? "Fresh install on the new PC, with your settings" : "Program folder and settings copied") })).join("")
+    ? movable.map(a => appRow(a, { sub: (a.publisher ? a.publisher + " · " : "") + METHOD_SUB[a.method] })).join("")
     : '<p class="muted" style="padding:6px 0">No programs can be moved automatically from this PC.</p>';
   $("manualBox").style.display = manual.length ? "" : "none";
   $("manualSummary").textContent = `${manual.length} ${manual.length === 1 ? "program needs" : "programs need"} installing by hand. Show why`;
@@ -1209,7 +1211,7 @@ async function openStore(folder) {
     $("reviewAppsCard").style.display = movable.length ? "" : "none";
     $("reviewAppsNote").textContent = `${movable.length} to bring over`;
     $("reviewApps").innerHTML = movable.map(a => appRow(a, {
-      sub: a.alreadyInstalled ? "Already on this PC. Only its settings are copied." : a.method === "Reinstall" ? "Installed fresh, then your settings are copied" : "Program folder and settings copied from the old PC",
+      sub: a.alreadyInstalled ? "Already on this PC. Only its settings are copied." : a.method === "Reinstall" ? "Installed fresh, then your settings are copied" : a.method === "Installer" ? "Its saved installer runs, then your settings are copied" : "Program folder and settings copied from the old PC",
     })).join("");
     show("new-review");
   } catch (e) { showError(e); }
@@ -1311,7 +1313,7 @@ $("finish").addEventListener("click", () => call("close"));
 const MOCK_APPS = [
   ["Discord", "Discord Inc.", "Reinstall"], ["Google Chrome", "Google LLC", "Reinstall"], ["Notepad++", "Notepad++ Team", "Reinstall"],
   ["Spotify", "Spotify AB", "Reinstall"], ["Steam", "Valve Corporation", "Reinstall"], ["Visual Studio Code", "Microsoft", "Reinstall"],
-  ["VLC media player", "VideoLAN", "Reinstall"], ["PortableTool", "Tool Co", "Copy"],
+  ["VLC media player", "VideoLAN", "Reinstall"], ["PortableTool", "Tool Co", "Copy"], ["QuickBooks Desktop", "Intuit", "Installer"],
   ["Realtek Audio Driver", "Realtek", "Manual", "Hardware software. The new PC needs the version made for its own hardware."],
   ["Microsoft 365 - en-us", "Microsoft", "Manual", "Office is tied to your Microsoft account. Install it from office.com and sign in."],
   ["Bloons TD 6", "Ninja Kiwi", "Manual", "A Steam game. Install it from your Steam library on the new PC; save files in your folders were copied."],

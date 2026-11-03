@@ -20,6 +20,7 @@ public static partial class AppPlanner
         var userKeys = users.ToDictionary(u => u.UserName, platform.UserSoftwareKeys);
         IReadOnlyList<string>? machineKeys = null;
         var plans = new List<AppEntry>();
+        var downloads = users.Select(u => Readable(platform, Path.Combine(u.ProfilePath, "Downloads"))).ToList();
 
         foreach (var app in inventory.Apps)
         {
@@ -28,7 +29,15 @@ public static partial class AppPlanner
             if (app.Scope != "Machine" && !users.Any(u => u.UserName.Equals(app.Scope, StringComparison.OrdinalIgnoreCase))) continue;
 
             var match = FindWinget(app, byName);
-            var (method, reason) = Decide(app, match, winget is not null, platform);
+            var (method, reason, installerHelps) = Decide(app, match, winget is not null, platform);
+            string? installer = null;
+            if (method == AppMethod.Manual && installerHelps &&
+                InstallerFinder.Find(app, p => Readable(platform, p), downloads) is { } found)
+            {
+                installer = found;
+                method = AppMethod.Installer;
+                reason = $"Its original installer was found on the old PC ({Path.GetFileName(found)}). It's saved and run on the new PC, then your settings are copied over.";
+            }
             var entry = new AppEntry
             {
                 Key = AppNames.Key(app.Name, app.RegistryKey),
@@ -41,6 +50,7 @@ public static partial class AppPlanner
                 InstallLocation = app.InstallLocation,
                 UninstallKey = app.RegistryKey,
                 Scope = app.Scope,
+                InstallerSource = installer,
             };
 
             if (method != AppMethod.Manual)
@@ -60,10 +70,19 @@ public static partial class AppPlanner
         // One row per program even if Windows lists it twice (e.g. 32- and 64-bit entries).
         return plans
             .GroupBy(p => AppNames.Normalize(p.Name))
-            .Select(g => g.OrderBy(p => p.Method).First())
-            .OrderBy(p => p.Method).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderBy(p => Rank(p.Method)).First())
+            .OrderBy(p => Rank(p.Method)).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    /// <summary>Best way first: Reinstall, Copy, Installer, then by hand.</summary>
+    public static int Rank(AppMethod method) => method switch
+    {
+        AppMethod.Reinstall => 0,
+        AppMethod.Copy => 1,
+        AppMethod.Installer => 2,
+        _ => 3,
+    };
 
     internal static WingetRow? FindWinget(InstalledApp app, Dictionary<string, WingetRow> byName)
     {
@@ -76,42 +95,42 @@ public static partial class AppPlanner
             .FirstOrDefault();
     }
 
-    private static (AppMethod, string) Decide(InstalledApp app, WingetRow? winget, bool hasWinget, IAppPlatform platform)
+    private static (AppMethod Method, string Reason, bool InstallerHelps) Decide(InstalledApp app, WingetRow? winget, bool hasWinget, IAppPlatform platform)
     {
         var name = app.Name;
         if (app.UninstallString?.Contains("steam://", StringComparison.OrdinalIgnoreCase) == true)
-            return (AppMethod.Manual, "A Steam game. Install it from your Steam library on the new PC; save files in your folders were copied.");
+            return (AppMethod.Manual, "A Steam game. Install it from your Steam library on the new PC; save files in your folders were copied.", false);
         // OneNote, Outlook and the rest of Office share one Click-to-Run install that can't be copied.
         if (Office().IsMatch(name) || app.UninstallString?.Contains("OfficeClickToRun", StringComparison.OrdinalIgnoreCase) == true)
-            return (AppMethod.Manual, "Office is tied to your Microsoft account. Install it from office.com and sign in.");
+            return (AppMethod.Manual, "Office is tied to your Microsoft account. Install it from office.com and sign in.", false);
         if (SqlServer().IsMatch(name))
-            return (AppMethod.Manual, "A database server. Install SQL Server fresh, then move each database with a backup and restore; copying its files won't work.");
+            return (AppMethod.Manual, "A database server. Install SQL Server fresh, then move each database with a backup and restore; copying its files won't work.", false);
 
         if (winget is not null)
-            return (AppMethod.Reinstall, "Installed fresh on the new PC, then your settings are copied over.");
+            return (AppMethod.Reinstall, "Installed fresh on the new PC, then your settings are copied over.", false);
 
         // Visual Studio Installer keeps its own records of what it installed (SSMS, Visual Studio, Build Tools).
         if (app.UninstallString?.Contains("Visual Studio\\Installer", StringComparison.OrdinalIgnoreCase) == true ||
             app.UninstallString?.Contains("vs_installer", StringComparison.OrdinalIgnoreCase) == true)
-            return (AppMethod.Manual, "Installed through the Visual Studio Installer, which has to install it again. Get it from Microsoft's website.");
+            return (AppMethod.Manual, "Installed through the Visual Studio Installer, which has to install it again. Get it from Microsoft's website.", false);
         if (Driver().IsMatch(name) || Driver().IsMatch(app.Publisher ?? ""))
-            return (AppMethod.Manual, "Hardware software. The new PC needs the version made for its own hardware.");
+            return (AppMethod.Manual, "Hardware software. The new PC needs the version made for its own hardware.", false);
         if (Oem().IsMatch(name) || Oem().IsMatch(app.Publisher ?? ""))
-            return (AppMethod.Manual, "A tool from the old PC's maker, made for that PC's hardware. The new PC comes with its own maker's tools.");
+            return (AppMethod.Manual, "A tool from the old PC's maker, made for that PC's hardware. The new PC comes with its own maker's tools.", false);
         if (Security().IsMatch(name))
-            return (AppMethod.Manual, "Security software has to be installed fresh.");
+            return (AppMethod.Manual, "Security software has to be installed fresh.", false);
         if (app.IsMsi)
-            return (AppMethod.Manual, "Installed with Windows Installer, so copying it would break updates and uninstalling. Get it from the maker's website.");
+            return (AppMethod.Manual, "Installed with Windows Installer, so copying it would break updates and uninstalling. Get it from the maker's website.", true);
 
         var location = app.InstallLocation?.Trim().Trim('"').TrimEnd('\\');
         if (string.IsNullOrEmpty(location) || !Directory.Exists(Readable(platform, location)))
-            return (AppMethod.Manual, hasWinget ? "Couldn't tell where it's installed." : "Couldn't tell where it's installed. (winget isn't on this PC, so nothing can be reinstalled automatically.)");
+            return (AppMethod.Manual, hasWinget ? "Couldn't tell where it's installed." : "Couldn't tell where it's installed. (winget isn't on this PC, so nothing can be reinstalled automatically.)", true);
         if (IsTooBroad(location))
-            return (AppMethod.Manual, "Its install folder is shared with other programs, so it can't be copied on its own.");
+            return (AppMethod.Manual, "Its install folder is shared with other programs, so it can't be copied on its own.", true);
         if (platform.HasServiceUnder(location))
-            return (AppMethod.Manual, "Runs a background Windows service, which needs a proper install.");
+            return (AppMethod.Manual, "Runs a background Windows service, which needs a proper install.", true);
 
-        return (AppMethod.Copy, "Not available to install automatically, so its program folder and settings are copied as they are. Works for most simple programs.");
+        return (AppMethod.Copy, "Not available to install automatically, so its program folder and settings are copied as they are. Works for most simple programs.", false);
     }
 
     private static string Readable(IAppPlatform platform, string path) => platform.Offline?.ToReadable(path) ?? path;
