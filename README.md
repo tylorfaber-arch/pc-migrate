@@ -87,6 +87,15 @@ Only the space in use is saved, so a 1 TB drive holding 200 GB makes a file of a
 The image is a normal Windows virtual disk (.vhdx): double-click it in File Explorer and it opens
 like a USB drive, so single files can be copied out of it without restoring anything.
 
+**Technician mode.** For doing jobs for clients: **Tools → Technician mode** (or
+`pcmigrate-cli tech --company "Your Business" --name "You" --contact "phone"`) adds a *Job details*
+box (client name, job number, notes) to the backup and move screens, and each job saves a printable
+client report next to the backup: your business details, the client and job, what was saved or
+moved for each person, which programs were set up, what's still to install by hand and why, and
+anything that couldn't be copied, with signature lines. It's a web page; print it or save it as PDF
+from the print dialog. License keys are only counted on it unless you turn on printing them.
+On the command line add `--client "Name" --job 1234` to capture or apply.
+
 **Scheduled backups.** **Tools → Scheduled backup** (or `pcmigrate-cli schedule --to E:\Backups
 --every daily --at 21:00`) keeps a backup of the PC up to date by itself, daily or weekly, even when
 nobody is signed in. Each run copies only new and changed files and removes files that were deleted
@@ -279,5 +288,5 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 10. Disk images (.vhdx), save and restore ← done
 11. Rescue USB ← done
 12. Scheduled backups ← done
-13. Technician mode
+13. Technician mode and client reports ← done
 14. Licensing, installer and a place to sell it

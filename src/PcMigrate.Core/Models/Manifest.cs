@@ -23,6 +23,8 @@ public sealed class Manifest
     /// <summary>Runtimes (Visual C++, .NET, Java) installed on the new PC before the programs.</summary>
     public List<Apps.RuntimeNeed> Runtimes { get; init; } = [];
     public bool UsedShadowCopy { get; set; }
+    /// <summary>Technician mode: the client and job this backup is for.</summary>
+    public JobInfo? Job { get; set; }
 }
 
 public sealed class ManifestFile

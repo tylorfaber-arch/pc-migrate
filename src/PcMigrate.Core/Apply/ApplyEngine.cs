@@ -37,6 +37,10 @@ public sealed class ApplyOptions
     public string? Password { get; init; }
     /// <summary>Where a protected backup is unlocked before it's put in place (default C:\ProgramData\pc-migrate). Emptied afterwards.</summary>
     public string? WorkFolder { get; init; }
+    /// <summary>Technician mode: set to write a client report next to the apply report.</summary>
+    public TechnicianSettings? Technician { get; init; }
+    /// <summary>Technician mode: the client and job, when the backup didn't have them.</summary>
+    public JobInfo? Job { get; init; }
 }
 
 public sealed class ApplyResult
@@ -52,6 +56,8 @@ public sealed class ApplyResult
     public List<InstalledApp> AppsToReinstall { get; } = [];
     public List<string> Warnings { get; } = [];
     public string? ReportPath { get; set; }
+    /// <summary>Technician mode: the printable report for the client.</summary>
+    public string? ClientReportPath { get; set; }
 }
 
 /// <summary>Puts a migration store onto this (new) PC.</summary>
@@ -132,6 +138,11 @@ public sealed class ApplyEngine(ISystemProbe probe, IMigrationLog log, IAppPlatf
         result.AppsToReinstall.AddRange(FindMissingApps(source.Apps.Where(a => !AppPlanner.IsHidden(a)), target.Apps)
             .Where(a => !handled.Contains(AppNames.Normalize(a.Name))));
         result.ReportPath = WriteReport(storeRoot, manifest, result, options);
+        if (options.Technician?.Enabled == true && !options.DryRun)
+            result.ClientReportPath = Report.TechnicianStore.Write(new Report.ClientReport.Input
+            {
+                Manifest = manifest, Applied = result, Technician = options.Technician, Job = options.Job, NewComputer = Environment.MachineName,
+            }, _reportFolder ?? storeRoot, log);
         return result;
     }
 

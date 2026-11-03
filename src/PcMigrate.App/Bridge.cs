@@ -7,6 +7,7 @@ using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
 using PcMigrate.Core.Clone;
 using PcMigrate.Core.Models;
+using PcMigrate.Core.Report;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
 using PcMigrate.Core.Update;
@@ -70,6 +71,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "planClone" => await Task.Run(() => PlanClone(Int(args, "from", -1), Int(args, "to", -1)).View),
         "shrinkSource" => await Task.Run(() => ShrinkSource(Int(args, "from", -1), Int(args, "to", -1))),
         "clone" => await Clone(Int(args, "from", -1), Int(args, "to", -1)),
+        "techSettings" => TechView(TechnicianStore.Load()),
+        "techSave" => TechSave(args),
         "scheduleStatus" => await Task.Run(ScheduleStatus),
         "scheduleSave" => await ScheduleSave(args),
         "scheduleOff" => await Task.Run(() => { BackupScheduler.Disable(); return ScheduleStatus(); }),
@@ -179,6 +182,29 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         {
             EndWork();
         }
+    }
+
+    // ----- technician mode -----
+
+    private static JobInfo? JobFrom(JsonElement args) =>
+        Str(args, "client").Trim() is { Length: > 0 } client
+            ? new JobInfo { Client = client, JobNumber = Str(args, "jobNumber").Trim() is { Length: > 0 } j ? j : null, Notes = Str(args, "notes").Trim() is { Length: > 0 } n ? n : null }
+            : null;
+
+    private static object TechView(TechnicianSettings t) =>
+        new { enabled = t.Enabled, company = t.Company, technician = t.Technician, contact = t.Contact, showKeys = t.ShowKeys };
+
+    private static object TechSave(JsonElement args)
+    {
+        string? Opt(string name) => Str(args, name).Trim() is { Length: > 0 } v ? v : null;
+        var t = new TechnicianSettings
+        {
+            Enabled = args.TryGetProperty("enabled", out var e) && e.ValueKind == JsonValueKind.True,
+            Company = Opt("company"), Technician = Opt("technician"), Contact = Opt("contact"),
+            ShowKeys = args.TryGetProperty("showKeys", out var k) && k.ValueKind == JsonValueKind.True,
+        };
+        TechnicianStore.Save(t);
+        return TechView(t);
     }
 
     // ----- scheduled backups -----
@@ -537,6 +563,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             IncludeWifi = args.GetProperty("wifi").GetBoolean(),
             IncludeUserSettings = args.GetProperty("settings").GetBoolean(),
             UseShadowCopy = args.GetProperty("shadow").GetBoolean() && _pulled is null,
+            Job = JobFrom(args),
         };
         var estimate = args.TryGetProperty("estimatedBytes", out var e) && e.ValueKind == JsonValueKind.Number ? (long)e.GetDouble() : 0;
         var logPath = toNetwork ? null : Path.Combine(destination, $"pc-migrate-{DateTime.Now:yyyyMMdd-HHmmss}.log");
@@ -561,6 +588,10 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
                 manifest = await Task.Run(() => new CaptureEngine(probe, log, apps).RunAsync(sink, options, ct), ct);
             }
             var bytes = manifest.Files.Sum(f => f.Length);
+            var tech = TechnicianStore.Load();
+            var clientReport = tech.Enabled && !toNetwork
+                ? TechnicianStore.Write(new PcMigrate.Core.Report.ClientReport.Input { Manifest = manifest, Technician = tech, SavedTo = destination }, destination, log)
+                : null;
             _notify.Finished(toNetwork ? "Sent to the new PC" : "Backup finished",
                 Summary(manifest.Files.Count, bytes, timer.Elapsed, log.Warnings.Count), logPath);
             return new
@@ -571,6 +602,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
                 warnings = log.Warnings,
                 logPath,
                 folder = toNetwork ? null : destination,
+                clientReport,
             };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -681,6 +713,8 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             Conflicts = Str(args, "conflicts") switch { "overwrite" => ConflictMode.Overwrite, "skip" => ConflictMode.Skip, _ => ConflictMode.NewerWins },
             MoveFromStore = args.TryGetProperty("move", out var mv) && mv.ValueKind == JsonValueKind.True,
             Password = Str(args, "password") is { Length: > 0 } pw ? pw : null,
+            Technician = TechnicianStore.Load(),
+            Job = JobFrom(args),
         };
 
         var folder = Str(args, "folder");
@@ -701,6 +735,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
                 bytes = result.BytesCopied,
                 warnings = result.Warnings,
                 reportPath = result.ReportPath,
+                clientReport = result.ClientReportPath,
                 programs = result.Apps
                     .Where(x => x.Outcome is not (AppOutcome.Manual or AppOutcome.NotSelected))
                     .Select(x => new { name = x.Name, outcome = x.Outcome.ToString(), message = x.Message }),

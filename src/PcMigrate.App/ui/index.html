@@ -404,6 +404,7 @@ footer .grow { flex: 1; }
       <button class="btn ghost" data-go="health"><svg><use href="#i-pulse"/></svg>Drive health</button>
       <button class="btn ghost" data-go="rescue"><svg><use href="#i-drive"/></svg>Rescue USB</button>
       <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
+      <button class="btn ghost" data-go="tech"><svg><use href="#i-key"/></svg>Technician mode</button>
     </div>
   </section>
 
@@ -476,6 +477,24 @@ footer .grow { flex: 1; }
       <div id="healthLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Asking the drives…</div>
     </div>
     <p class="hint">Many USB adapters and enclosures don't pass a drive's health through; those show as unknown. Connecting the drive with a different adapter, or inside a PC, usually works.</p>
+  </section>
+
+  <!-- TECHNICIAN MODE -->
+  <section class="screen" id="s-tech">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Technician mode</h1><p>For doing jobs for clients. Each backup and move asks for the client's name and job number, and saves a printable report for the client with your business details: what was moved, what's still to do, and anything that couldn't be copied.</p></div>
+    <div class="card">
+      <label class="toggle-row" style="padding-top:0"><div class="grow"><div class="name" style="font-weight:600">Technician mode</div><div class="sub">Remembered on this PC</div></div><input type="checkbox" class="switch" id="techOn"></label>
+      <div id="techFields">
+        <div style="display:grid;gap:10px;margin-top:8px">
+          <input type="text" id="techCompany" placeholder="Business name (top of the report)">
+          <input type="text" id="techName" placeholder="Your name">
+          <input type="text" id="techContact" placeholder="Phone, email or website">
+        </div>
+        <label class="toggle-row"><div class="grow"><div>Print license keys on client reports</div><div class="sub">Off: the report just says how many were saved with the backup</div></div><input type="checkbox" class="switch" id="techKeys"></label>
+      </div>
+    </div>
+    <div class="actions"><span class="spacer"></span><button class="btn" id="techSave">Save</button></div>
   </section>
 
   <!-- SCHEDULED BACKUP -->
@@ -642,6 +661,11 @@ footer .grow { flex: 1; }
       <label class="toggle-row"><div class="grow"><div>Wallpaper and mapped network drives</div><div class="sub">Per person</div></div><input type="checkbox" class="switch" id="optSettings" checked></label>
       <label class="toggle-row" id="shadowRow"><div class="grow"><div>Copy files that are open</div><div class="sub">Takes a snapshot first, so Outlook and browsers don't need closing</div></div><input type="checkbox" class="switch" id="optShadow" checked></label>
     </div>
+    <div class="card job-card" style="display:none">
+      <h2>Job details <span class="faint" style="font-weight:400;font-size:13px">(for the client report)</span></h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><input type="text" class="jobClient" placeholder="Client name" style="flex:2;min-width:200px"><input type="text" class="jobNumber" placeholder="Job or ticket number" style="flex:1;min-width:140px"></div>
+      <input type="text" class="jobNotes" placeholder="Notes for the report (optional)" style="width:100%;margin-top:10px">
+    </div>
     <div class="actions"><span class="muted" id="totalSize"></span><span class="spacer"></span><button class="btn" id="startCapture">Start moving</button></div>
   </section>
 
@@ -709,6 +733,11 @@ footer .grow { flex: 1; }
         <option value="skip">Always keep this PC's copy</option>
       </select>
     </div>
+    <div class="card job-card" style="display:none">
+      <h2>Job details <span class="faint" style="font-weight:400;font-size:13px">(for the client report)</span></h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><input type="text" class="jobClient" placeholder="Client name" style="flex:2;min-width:200px"><input type="text" class="jobNumber" placeholder="Job or ticket number" style="flex:1;min-width:140px"></div>
+      <input type="text" class="jobNotes" placeholder="Notes for the report (optional)" style="width:100%;margin-top:10px">
+    </div>
     <div class="actions"><span class="hint warn" style="margin:0" id="closeApps">Close web browsers and Outlook before you start.</span><span class="spacer"></span><button class="btn" id="startApply">Move it onto this PC</button></div>
   </section>
 
@@ -752,7 +781,7 @@ footer .grow { flex: 1; }
       <div class="apps" id="apps"></div>
     </div>
     <details id="warnBox" style="display:none"><summary id="warnSummary"></summary><div class="warn-list" id="warnList"></div></details>
-    <div class="actions"><button class="btn ghost" id="openReport" style="display:none">Open full report</button><span class="spacer"></span><button class="btn" id="finish">Close</button></div>
+    <div class="actions"><button class="btn ghost" id="openReport" style="display:none">Open full report</button><button class="btn ghost" id="openClientReport" style="display:none">Client report</button><span class="spacer"></span><button class="btn" id="finish">Close</button></div>
   </section>
 </main>
 
@@ -808,7 +837,7 @@ function fmtTime(s) {
 function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3500); }
 
 const state = { info: null, here: null, pulled: null, flow: null, target: null, code: "", folder: null, sizes: {}, store: null, warnings: [], move: false };
-const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "rescue": 1, "schedule": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
+const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "rescue": 1, "schedule": 1, "tech": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
   // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
@@ -820,6 +849,8 @@ function show(name) {
   if (name === "health") findHealth();
   if (name === "rescue") findSticks();
   if (name === "schedule") loadSchedule();
+  if (name === "tech") loadTech();
+  if (name === "old-what" || name === "new-review") document.querySelectorAll(".job-card").forEach(c => c.style.display = tech.enabled ? "" : "none");
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
   $("steps").innerHTML = [1, 2, 3, 4, 5].map(i => `<span class="${i <= step ? "on" : ""}"></span>`).join("");
@@ -1108,6 +1139,31 @@ $("startClone").addEventListener("click", async () => {
   $("progSub").textContent = "You can keep using the PC while this runs.";
 });
 
+// ----- technician mode -----
+let tech = { enabled: false };
+function jobArgs(screen) {
+  if (!tech.enabled) return {};
+  const q = c => $(screen).querySelector(c).value.trim();
+  return { client: q(".jobClient"), jobNumber: q(".jobNumber"), notes: q(".jobNotes") };
+}
+// The same client carries over from the backup screen to the move screen.
+document.querySelectorAll(".jobClient, .jobNumber, .jobNotes").forEach(el => el.addEventListener("input", () =>
+  document.querySelectorAll("." + el.className.split(" ").find(c => c.startsWith("job"))).forEach(o => { if (o !== el) o.value = el.value; })));
+async function loadTech() {
+  try { tech = await call("techSettings"); } catch (e) { toast(e.message); }
+  $("techOn").checked = tech.enabled; $("techCompany").value = tech.company || ""; $("techName").value = tech.technician || "";
+  $("techContact").value = tech.contact || ""; $("techKeys").checked = !!tech.showKeys;
+  $("techFields").style.opacity = tech.enabled ? 1 : .5;
+}
+$("techOn").addEventListener("change", e => { $("techFields").style.opacity = e.target.checked ? 1 : .5; });
+$("techSave").addEventListener("click", async () => {
+  try {
+    tech = await call("techSave", { enabled: $("techOn").checked, company: $("techCompany").value, technician: $("techName").value, contact: $("techContact").value, showKeys: $("techKeys").checked });
+    toast(tech.enabled ? "Technician mode is on." : "Technician mode is off."); show("home");
+  } catch (e) { toast(e.message); }
+});
+call("techSettings").then(t => { if (t) tech = t; }).catch(() => {});
+
 // ----- scheduled backup -----
 let sched = { on: false }, schedFolder = null;
 async function loadSchedule() {
@@ -1359,6 +1415,7 @@ $("startCapture").addEventListener("click", async () => {
   const args = {
     users, apps: selectedApps(), wifi: $("optWifi").checked, settings: $("optSettings").checked, shadow: $("optShadow").checked,
     estimatedBytes: users.reduce((a, u) => a + (state.sizes[u] ? state.sizes[u].bytes : 0), 0),
+    ...jobArgs("s-old-what"),
   };
   startProgress(state.flow === "send" ? `Sending to ${state.target.name}` : state.flow === "here" ? `Reading ${state.pulled.computerName}'s drive` : "Saving to your drive", args.estimatedBytes);
   try {
@@ -1379,7 +1436,7 @@ $("startCapture").addEventListener("click", async () => {
       title: state.flow === "send" ? "Sent!" : "Saved!",
       sub: state.flow === "send" ? `Everything is on ${state.target.name}. Finish up there.` : "Unplug the drive and plug it into the new PC.",
       stats: [["Files", fmtNum(r.files)], ["Size", fmtBytes(r.bytes)], ["Time", fmtTime(r.seconds)]],
-      warnings: r.warnings, logPath: r.logPath,
+      warnings: r.warnings, logPath: r.logPath, clientReport: r.clientReport,
     });
   } catch (e) { showError(e); }
 });
@@ -1464,13 +1521,13 @@ $("startApply").addEventListener("click", async () => {
   startProgress("Putting everything in place", state.store.bytes);
   try {
     const apps = [...$("reviewApps").querySelectorAll("input:checked")].map(c => c.dataset.app);
-    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value, move: state.move, password: state.password || "" });
+    const r = await call("apply", { folder: state.folder, map, apps, conflicts: $("conflicts").value, move: state.move, password: state.password || "", ...jobArgs("s-new-review") });
     if (state.captureWarnings) { r.warnings = [...state.captureWarnings, ...r.warnings]; state.captureWarnings = null; }
     showDone({
       title: "Welcome to your new PC",
       sub: "Sign out and back in to see your wallpaper and mapped drives.",
       stats: [["Files copied", fmtNum(r.copied)], ["Size", fmtBytes(r.bytes)], ["Already up to date", fmtNum(r.skipped)]],
-      warnings: r.warnings, apps: r.apps, programs: r.programs, reportPath: r.reportPath,
+      warnings: r.warnings, apps: r.apps, programs: r.programs, reportPath: r.reportPath, clientReport: r.clientReport,
     });
   } catch (e) { showError(e); }
 });
@@ -1538,13 +1595,15 @@ function showDone(d) {
   const report = d.reportPath || d.logPath;
   $("openReport").style.display = report ? "" : "none";
   $("openReport").onclick = () => call("openPath", { path: report });
+  $("openClientReport").style.display = d.clientReport ? "" : "none";
+  $("openClientReport").onclick = () => call("openPath", { path: d.clientReport });
   show("done");
 }
 function showError(e) {
   $("doneBadge").className = "badge bad"; $("doneBadge").innerHTML = '<svg><use href="#i-x"/></svg>';
   $("doneTitle").textContent = /cancel/i.test(e.message) ? "Stopped" : "Something went wrong";
   $("doneSub").textContent = e.message;
-  $("doneStats").style.display = "none"; $("appsCard").style.display = "none"; $("progCard").style.display = "none"; $("warnBox").style.display = "none"; $("openReport").style.display = "none";
+  $("doneStats").style.display = "none"; $("appsCard").style.display = "none"; $("progCard").style.display = "none"; $("warnBox").style.display = "none"; $("openReport").style.display = "none"; $("openClientReport").style.display = "none";
   show("done");
 }
 $("finish").addEventListener("click", () => call("close"));
@@ -1612,6 +1671,8 @@ const Mock = {
         users: [{ name: "Sam", path: "E:\\Users\\Sam" }, { name: "Admin", path: "E:\\Users\\Admin" }] }, 1200);
       case "captureHere": return reply({ folder: "C:\\ProgramData\\pc-migrate\\from-drive-1", files: 41200, bytes: 61e9, seconds: 900, warnings: ["Couldn't read E:\\Users\\Sam\\Videos\\clip.mp4: CRC error"] }, 4000);
       case "readStore": if (args.password !== undefined && args.password !== "" && args.password !== "correct horse") return setTimeout(() => receive({ id, error: "That password is wrong." }), 300); return reply({ fromComputer: "TYLOR-DESKTOP", captured: new Date().toISOString(), files: 57372, bytes: 69.6e9, users: [{ name: "tylor", files: 48211, bytes: 61.4e9 }, { name: "Sam", files: 9120, bytes: 8.2e9 }], targetUsers: ["tylor", "Admin"], apps: MOCK_APPS.map((a, i) => ({ ...a, alreadyInstalled: i === 1 })) });
+      case "techSettings": return reply(Mock.tech || { enabled: false, company: null, technician: null, contact: null, showKeys: false }, 0);
+      case "techSave": Mock.tech = { ...args }; return reply(Mock.tech);
       case "scheduleStatus": return reply(Mock.sched || { on: false });
       case "scheduleSave": Mock.sched = { on: true, folder: args.folder, describe: args.frequency === "weekly" ? `Every ${args.day} at ${args.time}` : `Every day at ${args.time}`, frequency: args.frequency, time: args.time, day: args.day, isProtected: !!args.password,
           lastRun: new Date(Date.now() - 864e5).toISOString(), lastOk: true, lastResult: "Backed up 48,211 files (61.4 GB); 12 deleted from the PC were removed, 0 warning(s).", running: false, logPath: "C:\\ProgramData\\pc-migrate\\backup.log" };
@@ -1647,10 +1708,10 @@ const Mock = {
         emit("log", { message: "Copying files for tylor…" }, 300);
         emit("warning", { message: "Could not copy C:\\Users\\tylor\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\LOCK: in use" }, 2000);
         return reply(cmd === "apply"
-          ? { copied: 57210, skipped: 162, failed: 0, bytes: 69.6e9, warnings: ["No user 'guest' on this PC, so guest's files were skipped."], reportPath: "E:\\Migration\\apply-report.txt",
+          ? { copied: 57210, skipped: 162, failed: 0, bytes: 69.6e9, warnings: ["No user 'guest' on this PC, so guest's files were skipped."], reportPath: "E:\\Migration\\apply-report.txt", clientReport: args.client ? "E:\\Migration\\client-report.html" : null,
               programs: [{ name: "Google Chrome", outcome: "AlreadyInstalled" }, { name: "Spotify", outcome: "Failed", message: "This program's installer refuses to run as administrator. Install it normally from its website." }, { name: "Discord", outcome: "Installed" }, { name: "VLC media player", outcome: "Installed" }, { name: "Notepad++", outcome: "Installed" }, { name: "Visual Studio Code", outcome: "Installed" }, { name: "PortableTool", outcome: "Copied" }],
               apps: [{ name: "Spotify", reason: "This program's installer refuses to run as administrator. Install it normally from its website." }, { name: "Realtek Audio Driver", reason: "Hardware software. The new PC needs the version made for its own hardware." }, { name: "Microsoft 365 - en-us", reason: "Office is tied to your Microsoft account. Install it from office.com and sign in." }, { name: "Bloons TD 6", reason: "A Steam game. Install it from your Steam library on the new PC." }] }
-          : { files: 57372, bytes: 69.6e9, seconds: 1460, warnings: ["Could not copy ...\\LOCK: in use"], logPath: "E:\\Migration\\pcmigrate.log" }, 5200);
+          : { files: 57372, bytes: 69.6e9, seconds: 1460, warnings: ["Could not copy ...\\LOCK: in use"], logPath: "E:\\Migration\\pcmigrate.log", clientReport: args.client ? "E:\\Migration\\client-report.html" : null }, 5200);
       }
       default: return reply(null);
     }

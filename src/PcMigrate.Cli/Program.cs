@@ -6,6 +6,7 @@ using PcMigrate.Core.Apps;
 using PcMigrate.Core.Capture;
 using PcMigrate.Core.Clone;
 using PcMigrate.Core.Models;
+using PcMigrate.Core.Report;
 using PcMigrate.Core.Schedule;
 using PcMigrate.Core.Storage;
 using PcMigrate.Core.Transfer;
@@ -109,6 +110,7 @@ async Task<int> Run(string[] argv)
             "restore-image" => await RestoreImage(),
             "rescue-usb" => await RescueUsb(),
             "backup" => await Backup(),
+            "tech" => Technician(),
             "schedule" => await ScheduleBackup(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
@@ -394,7 +396,17 @@ async Task<int> Run(string[] argv)
             IncludeWifi = !cli.Flag("no-wifi"),
             IncludeUserSettings = !cli.Flag("no-settings"),
             Apps = apps,
+            Job = ReadJob(),
         };
+    }
+
+    /// <summary>Technician mode: a printable report for the client in the backup folder.</summary>
+    void WriteCaptureReport(Manifest manifest, string folder)
+    {
+        var tech = TechnicianStore.Load();
+        if (!tech.Enabled) return;
+        if (TechnicianStore.Write(new ClientReport.Input { Manifest = manifest, Technician = tech, SavedTo = folder }, folder, log) is { } path)
+            Console.WriteLine($"Client report: {path}");
     }
 
     async Task<int> Capture()
@@ -416,7 +428,39 @@ async Task<int> Run(string[] argv)
 
         await using var sink = new FolderSink(to, password);
         var manifest = await new CaptureEngine(probe, log, appPlatform).RunAsync(sink, options, cts.Token);
+        WriteCaptureReport(manifest, sink.Root);
         return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate-cli apply --from \"{sink.Root}\"", manifest.Warnings.Count);
+    }
+
+    int Technician()
+    {
+        var off = cli.Flag("off");
+        var company = cli.Get("company");
+        var name = cli.Get("name");
+        var contact = cli.Get("contact");
+        var showKeys = cli.Get("show-keys");
+        cli.RejectUnknown();
+        var tech = TechnicianStore.Load();
+        if (off) tech.Enabled = false;
+        else if (company is not null || name is not null || contact is not null || showKeys is not null)
+        {
+            tech.Enabled = true;
+            tech.Company = company ?? tech.Company;
+            tech.Technician = name ?? tech.Technician;
+            tech.Contact = contact ?? tech.Contact;
+            if (showKeys is not null) tech.ShowKeys = !showKeys.Equals("false", StringComparison.OrdinalIgnoreCase);
+        }
+        if (off || company is not null || name is not null || contact is not null || showKeys is not null) TechnicianStore.Save(tech);
+        Console.WriteLine($"Technician mode: {(tech.Enabled ? "on" : "off")}");
+        if (tech.Enabled)
+        {
+            Console.WriteLine($"  Business:  {tech.Company ?? "-"}");
+            Console.WriteLine($"  Technician: {tech.Technician ?? "-"}");
+            Console.WriteLine($"  Contact:   {tech.Contact ?? "-"}");
+            Console.WriteLine($"  License keys on client reports: {(tech.ShowKeys ? "shown in full" : "just counted")}");
+            Console.WriteLine("  Add --client \"Name\" [--job 1234] to capture or apply; a client report is saved with each one.");
+        }
+        return 0;
     }
 
     /// <summary>Brings a backup folder up to date: only new and changed files are copied.</summary>
@@ -559,6 +603,9 @@ async Task<int> Run(string[] argv)
         return applyAfter ? await Apply(to, applyOptions) : Done($"Run 'pcmigrate-cli apply --from \"{to}\"' when ready.", 0);
     }
 
+    JobInfo? ReadJob() =>
+        cli.Get("client") is { Length: > 0 } client ? new JobInfo { Client = client, JobNumber = cli.Get("job"), Notes = cli.Get("notes") } : null;
+
     ApplyOptions ReadApplyOptions(string? from = null)
     {
         var password = cli.Get("password");
@@ -588,6 +635,8 @@ async Task<int> Run(string[] argv)
             IncludeUserSettings = !cli.Flag("no-settings"),
             IncludeApps = !cli.Flag("no-apps"),
             Password = password,
+            Technician = TechnicianStore.Load(),
+            Job = ReadJob(),
         };
     }
 
@@ -608,6 +657,7 @@ async Task<int> Run(string[] argv)
         if (result.AppsToReinstall.Count > 0)
             Console.WriteLine($"{result.AppsToReinstall.Count} program(s) from the old PC still need installing by hand; they are listed in the report.");
         if (result.ReportPath is not null) Console.WriteLine($"Report: {result.ReportPath}");
+        if (result.ClientReportPath is not null) Console.WriteLine($"Client report: {result.ClientReportPath}");
         return Done(options.DryRun ? "Dry run only, nothing was changed." : "Done. Sign out and back in to see the moved settings.", result.Warnings.Count);
     }
 
@@ -673,6 +723,9 @@ async Task<int> Run(string[] argv)
               pcmigrate-cli schedule --to <folder> [--every daily|weekly] [--at 21:00] [--day monday] [--encrypt]
                                            Back up automatically in the background. 'schedule' alone shows
                                            the last result; --now runs it straight away; --off turns it off.
+              pcmigrate-cli tech --company "Name" [--name "Tech"] [--contact "phone/email"] [--show-keys] | --off
+                                           Technician mode: capture and apply save a printable client report.
+                                           Add --client "Client" [--job 1234] [--notes "..."] to capture or apply.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):

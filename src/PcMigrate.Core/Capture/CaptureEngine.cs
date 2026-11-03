@@ -19,6 +19,8 @@ public sealed class CaptureOptions
     public CaptureRules Rules { get; init; } = new();
     /// <summary>Programs to bring along, as planned by <see cref="AppPlanner"/>. Manual ones are only recorded.</summary>
     public IReadOnlyList<AppEntry> Apps { get; init; } = [];
+    /// <summary>Technician mode: the client and job, saved in the manifest.</summary>
+    public JobInfo? Job { get; init; }
 }
 
 /// <summary>Collects everything from the old PC and sends it to a sink (folder or network).</summary>
@@ -32,7 +34,7 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         log.Info(offline is null ? "Scanning this PC..." : $"Reading the drive at {offline.Root}...");
         var inventory = probe.GetInventory();
         var users = SelectUsers(inventory, options);
-        var manifest = new Manifest { Inventory = inventory };
+        var manifest = new Manifest { Inventory = inventory, Job = options.Job };
         void Warn(string message)
         {
             log.Warn(message);
