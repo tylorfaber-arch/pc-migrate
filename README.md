@@ -87,6 +87,13 @@ Only the space in use is saved, so a 1 TB drive holding 200 GB makes a file of a
 The image is a normal Windows virtual disk (.vhdx): double-click it in File Explorer and it opens
 like a USB drive, so single files can be copied out of it without restoring anything.
 
+**Rescue USB.** For a PC whose Windows won't start at all: **Tools → Rescue USB** (or
+`pcmigrate-cli rescue-usb --disk <n>`) turns a USB stick into one that starts any PC straight into
+pc-migrate's menu. Choose 6 there to save the PC's files to the stick or another USB drive, no
+screwdriver needed. The stick is built from the PC's own Windows recovery environment, so nothing
+is downloaded from Microsoft and Secure Boot doesn't block it. Sticks of 8 GB or more get a second
+part (PCM-DATA) to save backups on. Start a PC from it with its boot menu key (F12 on most, F9 on HP).
+
 `pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
@@ -179,6 +186,12 @@ Licence keys and sign-ins don't move.
   `diskpart`, and the drive is cloned into it exactly as above, so only used clusters are written
   and the file stays about the size of the data. Restoring attaches the image read-only and clones
   it onto the chosen drive. A half-written image is deleted if anything goes wrong.
+- **Rescue USB.** The stick gets a 2 GB FAT32 boot part and an NTFS part for backups. A copy of
+  the PC's Windows recovery image (winre.wim, from its recovery partition or System32\Recovery) is
+  opened with DISM, and a `winpeshl.ini` is added so it opens pc-migrate instead of the recovery
+  menu. Windows' signed boot manager, `boot.sdi` and a boot menu (made with `bcdedit`) that starts
+  the image from a RAM disk go on the boot part, the same way Windows' own install USBs start.
+  The command-line tool runs there (the app needs WebView2, which the rescue system doesn't have).
 - **Finding the new PC.** The old PC broadcasts a short question on UDP port 47801 and every PC
   waiting to receive answers with its name, so nobody has to look up an IP address.
 - **The app window.** The screens are a web page (`src/PcMigrate.App/ui/index.html`) shown with
@@ -250,5 +263,6 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 8. Password-protected backups ← done
 9. Keep program installers, and install runtimes (VC++, .NET, Java) automatically ← done
 10. Disk images (.vhdx), save and restore ← done
-11. Rescue USB, scheduled backups, technician mode
-12. Licensing, installer and a place to sell it
+11. Rescue USB ← done
+12. Scheduled backups, technician mode
+13. Licensing, installer and a place to sell it
