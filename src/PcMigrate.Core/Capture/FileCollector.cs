@@ -10,9 +10,22 @@ public static class FileCollector
     private const FileAttributes RecallOnDataAccess = (FileAttributes)0x00400000;
     private const FileAttributes CloudOnly = FileAttributes.Offline | RecallOnOpen | RecallOnDataAccess;
 
+    /// <summary>
+    /// A junction or symbolic link (it points at another folder). OneDrive's own files are reparse points
+    /// too, but they hold real data and aren't links, so they're copied.
+    /// </summary>
+    public static bool IsLink(FileSystemInfo entry)
+    {
+        if (!entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) return false;
+        try { return entry.LinkTarget is not null; }
+        catch (IOException) { return true; }
+        catch (UnauthorizedAccessException) { return true; }
+    }
+
     /// <param name="root">Folder to walk.</param>
     /// <param name="relativeBase">Prefix for <see cref="CollectedFile.RelativePath"/>, e.g. "Documents".</param>
-    public static IEnumerable<CollectedFile> Enumerate(string root, string relativeBase, CaptureRules rules, Action<string> warn)
+    /// <param name="cloudOnly">Told about each online-only file that was skipped. Without it, each one is a warning.</param>
+    public static IEnumerable<CollectedFile> Enumerate(string root, string relativeBase, CaptureRules rules, Action<string> warn, Action<string>? cloudOnly = null)
     {
         if (!Directory.Exists(root)) yield break;
 
@@ -49,7 +62,7 @@ public static class FileCollector
                 {
                     // Junctions such as "My Music" inside Documents point back into the profile;
                     // following them would copy things twice or loop forever.
-                    if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                    if (IsLink(entry)) continue;
                     if (rules.IsFolderExcluded(entry.Name)) continue;
                     pending.Push((entry.FullName, childRel));
                 }
@@ -58,10 +71,11 @@ public static class FileCollector
                     if (rules.IsFileExcluded(file.Name)) continue;
                     if ((file.Attributes & CloudOnly) != 0)
                     {
-                        warn($"Skipped online-only file (not downloaded on this PC): {file.FullName}");
+                        if (cloudOnly is not null) cloudOnly(file.FullName);
+                        else warn($"Skipped online-only file (not downloaded on this PC): {file.FullName}");
                         continue;
                     }
-                    if (file.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                    if (IsLink(file)) continue;
                     yield return new CollectedFile(file.FullName, childRel, file.Length, file.LastWriteTimeUtc);
                 }
             }

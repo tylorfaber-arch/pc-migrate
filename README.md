@@ -85,7 +85,9 @@ Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
 
 | Moves | Notes |
 |---|---|
-| Desktop, Documents, Downloads, Pictures, Music, Videos, Favorites, Contacts, Links, Saved Games | For every user, or only `--user` |
+| Each person's whole user folder: Desktop, Documents, Downloads, Pictures, Music, Videos, OneDrive, Dropbox and any other folder in it | For every user, or only `--user`. AppData (program data) is left out except the parts below, and so are developer caches like `.nuget`. |
+| Desktop, Documents and the rest when they were moved elsewhere | Followed to another folder or drive. On a network share they're left where they are, with a warning. |
+| Outlook data files (.pst) and Sticky Notes | Outlook's .ost caches are left out; they rebuild from the mail server. |
 | Chrome, Edge, Brave, Firefox and Opera profiles | Bookmarks, history, extensions, settings. Chrome/Edge **saved passwords do not move**: Windows locks them to the old PC. Export them from the browser first. |
 | Outlook signatures, Office templates, Start menu shortcuts, pinned taskbar items, themes | |
 | Wallpaper | |
@@ -93,8 +95,11 @@ Clone a drive: `pcmigrate-cli disks` lists the drives by number, then
 | Saved Wi-Fi networks, with passwords | From a pulled drive the networks move but not their passwords (Windows encrypts them with the old PC's own key), so each asks once. |
 | **Programs** | See *How programs move* below |
 
-Caches and temporary files are skipped. OneDrive "online-only" files are skipped since OneDrive
-will download them again on the new PC.
+Caches and temporary files are skipped. OneDrive "online-only" files are skipped (they're in the
+cloud, not on the drive) and counted in one warning; they come back when the person signs in to OneDrive.
+Folders outside everyone's user folder, such as `C:\QuickBooks` or `C:\Users\Public\Documents`, aren't
+copied, but any over 1 MB are named in a warning so nothing is left behind without you knowing. Windows'
+own setup accounts (`defaultuser0`, `defaultuser100000`) are ignored.
 
 ## How programs move
 

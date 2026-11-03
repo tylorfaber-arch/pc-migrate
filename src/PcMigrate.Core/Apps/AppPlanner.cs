@@ -96,6 +96,8 @@ public static partial class AppPlanner
             return (AppMethod.Manual, "Installed through the Visual Studio Installer, which has to install it again. Get it from Microsoft's website.");
         if (Driver().IsMatch(name) || Driver().IsMatch(app.Publisher ?? ""))
             return (AppMethod.Manual, "Hardware software. The new PC needs the version made for its own hardware.");
+        if (Oem().IsMatch(name) || Oem().IsMatch(app.Publisher ?? ""))
+            return (AppMethod.Manual, "A tool from the old PC's maker, made for that PC's hardware. The new PC comes with its own maker's tools.");
         if (Security().IsMatch(name))
             return (AppMethod.Manual, "Security software has to be installed fresh.");
         if (app.IsMsi)
@@ -146,6 +148,9 @@ public static partial class AppPlanner
 
     [GeneratedRegex(@"\bdriver\b|\bchipset\b|^(intel|nvidia|amd|advanced micro devices|realtek|synaptics|elan|qualcomm|dolby|conexant|broadcom)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Driver();
+
+    [GeneratedRegex(@"^(dell|hp|hewlett[- ]packard|lenovo|asus|asustek|acer|msi|micro-star|microsoft surface|samsung electronics|toshiba|dynabook|fujitsu|panasonic|getac)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Oem();
 
     [GeneratedRegex(@"\b(norton|mcafee|bitdefender|kaspersky|avast|avg|eset|sophos|crowdstrike|sentinelone|webroot|trend micro|antivirus|anti-virus)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Security();
