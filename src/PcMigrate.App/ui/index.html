@@ -90,6 +90,23 @@ header {
 .pc-chip b { color: var(--text); font-weight: 600; }
 
 /* ---------- layout ---------- */
+.shell { flex: 1; display: flex; min-height: 0; }
+aside.side { width: 232px; flex-shrink: 0; overflow-y: auto; padding: 18px 12px; border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; gap: 2px; transition: opacity .2s; }
+aside.side .group { color: var(--faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: 14px 10px 6px; }
+aside.side .group:first-child { padding-top: 2px; }
+aside.side button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13.5px; text-align: left; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+aside.side button svg { width: 17px; height: 17px; flex-shrink: 0; }
+aside.side button:hover { background: var(--surface-2); color: var(--text); }
+aside.side button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+aside.side button .warn-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--bad); opacity: .7; }
+aside.side.locked { opacity: .45; pointer-events: none; }
+aside.side .lock-note { display: none; order: -1; font-size: 12px; color: var(--text); padding: 4px 10px 10px; }
+aside.side.locked .lock-note { display: block; }
+@media (max-width: 900px) {
+  aside.side { width: 58px; padding: 14px 8px; }
+  aside.side .group, aside.side button span, aside.side button .warn-dot, aside.side .lock-note { display: none; }
+  aside.side button { justify-content: center; padding: 9px 0; }
+}
 main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .screen { display: none; width: 100%; max-width: 820px; padding: 40px 32px 32px; flex-direction: column; animation: in .28s ease; }
 .screen.active { display: flex; }
@@ -396,6 +413,26 @@ footer .grow { flex: 1; }
   <button class="btn" id="updateNow">Update now</button>
 </div>
 
+<div class="shell">
+<aside class="side" id="side">
+  <div class="group">Move</div>
+  <button data-nav="home" title="Start"><svg><use href="#i-pc"/></svg><span>Start</span></button>
+  <button data-nav="pulled" title="Dead PC's drive"><svg><use href="#i-hdd"/></svg><span>Dead PC's drive</span></button>
+  <div class="group">Drives</div>
+  <button data-nav="clone" title="Clone or image (erases the target)"><svg><use href="#i-clone"/></svg><span>Clone or image</span><i class="warn-dot"></i></button>
+  <button data-nav="health" title="Drive health"><svg><use href="#i-pulse"/></svg><span>Drive health</span></button>
+  <button data-nav="resize" title="Resize partitions (changes the drive)"><svg><use href="#i-hdd"/></svg><span>Resize partitions</span><i class="warn-dot"></i></button>
+  <button data-nav="wipe" title="Secure wipe (erases data)"><svg><use href="#i-x"/></svg><span>Secure wipe</span><i class="warn-dot"></i></button>
+  <div class="group">Backup and recovery</div>
+  <button data-nav="schedule" title="Scheduled backup"><svg><use href="#i-clone"/></svg><span>Scheduled backup</span></button>
+  <button data-nav="rescue" title="Rescue USB"><svg><use href="#i-drive"/></svg><span>Rescue USB</span></button>
+  <button data-nav="undelete" title="Get deleted files back"><svg><use href="#i-hdd"/></svg><span>Get deleted files back</span></button>
+  <div class="group">Tools</div>
+  <button data-nav="keys" title="License keys"><svg><use href="#i-key"/></svg><span>License keys</span></button>
+  <button data-nav="dups" title="Duplicate files"><svg><use href="#i-folder"/></svg><span>Duplicate files</span></button>
+  <button data-nav="tech" title="Technician mode"><svg><use href="#i-key"/></svg><span>Technician mode</span></button>
+  <div class="lock-note">A job is running. The menu comes back when it's finished.</div>
+</aside>
 <main>
   <!-- HOME -->
   <section class="screen" id="s-home">
@@ -424,17 +461,6 @@ footer .grow { flex: 1; }
         <div><h2>Clone or image a whole drive</h2>
         <p>Make an exact copy of one drive onto another, or save it as one image file to put back later. The copy starts up on its own.</p></div>
       </button>
-    </div>
-    <div class="tools"><span class="label">Tools</span>
-      <button class="btn ghost" data-go="keys"><svg><use href="#i-key"/></svg>License keys</button>
-      <button class="btn ghost" data-go="health"><svg><use href="#i-pulse"/></svg>Drive health</button>
-      <button class="btn ghost" data-go="rescue"><svg><use href="#i-drive"/></svg>Rescue USB</button>
-      <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
-      <button class="btn ghost" data-go="undelete"><svg><use href="#i-hdd"/></svg>Get deleted files back</button>
-      <button class="btn ghost" data-go="dups"><svg><use href="#i-folder"/></svg>Duplicate files</button>
-      <button class="btn ghost" data-go="resize"><svg><use href="#i-hdd"/></svg>Resize partitions</button>
-      <button class="btn ghost" data-go="wipe"><svg><use href="#i-x"/></svg>Secure wipe</button>
-      <button class="btn ghost" data-go="tech"><svg><use href="#i-key"/></svg>Technician mode</button>
     </div>
   </section>
 
@@ -919,6 +945,7 @@ footer .grow { flex: 1; }
     <div class="actions"><button class="btn ghost" id="openReport" style="display:none">Open full report</button><button class="btn ghost" id="openClientReport" style="display:none">Client report</button><span class="spacer"></span><button class="btn" id="finish">Close</button></div>
   </section>
 </main>
+</div>
 
 <footer><span id="footLeft"></span><span class="grow"></span><span>Nothing leaves your network. No account needed.</span></footer>
 <div class="toast" id="toast"></div>
@@ -975,6 +1002,13 @@ const state = { info: null, here: null, pulled: null, flow: null, target: null, 
 const STEPS = { "home": 0, "old-method": 1, "new-method": 1, "pulled": 1, "pulled-method": 2, "clone": 1, "clone-plan": 2, "keys": 1, "health": 1, "rescue": 1, "schedule": 1, "tech": 1, "old-find": 2, "old-drive": 2, "new-receive": 2, "new-drive": 2, "old-what": 3, "new-review": 3, "progress": 4, "done": 5 };
 
 function show(name) {
+  showScreen(name);
+  const top = name.startsWith("clone") ? "clone" : name === "pulled-method" ? "pulled" : name;
+  document.querySelectorAll("#side [data-nav]").forEach(b => b.classList.toggle("on", b.dataset.nav === top || (top !== "progress" && top !== "done" && b.dataset.nav === "home" && !document.querySelector(`#side [data-nav="${top}"]`))));
+  $("side").classList.toggle("locked", name === "progress");
+}
+document.querySelectorAll("#side [data-nav]").forEach(b => b.addEventListener("click", () => show(b.dataset.nav)));
+function showScreen(name) {
   // With a pulled drive, "back to how do you want to move it" means the drive's own choice screen.
   if (name === "old-method" && state.pulled) name = "pulled-method";
   if (name === "home" && state.pulled) leaveDrive();

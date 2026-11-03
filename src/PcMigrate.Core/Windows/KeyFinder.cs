@@ -30,7 +30,7 @@ public static class KeyFinder
         var found = new List<LicenseKey>();
         Windows(software, label, found);
         Office(software, label, found);
-        Office(software.OpenSubKey("WOW6432Node"), label + "\\WOW6432Node", found);
+        using (var wow = software.OpenSubKey("WOW6432Node")) Office(wow, label + "\\WOW6432Node", found);
         Scan(software, label, found);
         return found
             .GroupBy(k => (k.Product.ToUpperInvariant(), k.Key.ToUpperInvariant()))
@@ -52,7 +52,7 @@ public static class KeyFinder
     private static void Office(RegistryKey? software, string label, List<LicenseKey> found)
     {
         if (software is null) return;
-        using (software)
+        // The caller owns the key: closing it here broke the scan that runs after this.
         {
             using var office = software.OpenSubKey(@"Microsoft\Office");
             if (office is null) return;

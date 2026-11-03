@@ -27,6 +27,8 @@ internal sealed class FakePc : ISystemProbe, IDisposable
     public Inventory Inventory { get; }
     public string? CurrentUserSid => null;
     public Inventory GetInventory() => Inventory;
+    public Func<IReadOnlyList<PcMigrate.Core.Keys.LicenseKey>>? Keys { get; set; }
+    public IReadOnlyList<PcMigrate.Core.Keys.LicenseKey> LicenseKeys() => Keys?.Invoke() ?? [];
 
     public string Profile(string user) => Inventory.Users.Single(u => u.UserName == user).ProfilePath;
 

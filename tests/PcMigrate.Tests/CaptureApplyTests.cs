@@ -184,4 +184,20 @@ public class CaptureApplyTests
             [App("Google Chrome"), App("7-Zip 24.08 (x64)")]).Select(a => a.Name);
         Assert.Equal(["Spotify"], missing);
     }
+
+    [Fact]
+    public async Task A_failure_reading_license_keys_never_stops_the_backup()
+    {
+        using var oldPc = new FakePc("old", "a");
+        using var store = new TempDir();
+        oldPc.WriteFile("a", "Documents/x.txt", "x");
+        oldPc.Keys = () => throw new ObjectDisposedException("HKEY_LOCAL_MACHINE\\SOFTWARE", "Cannot access a closed registry key.");
+        var log = new ListLog();
+
+        await using (var sink = new FolderSink(store.Path))
+            await new CaptureEngine(oldPc, log).RunAsync(sink, Options.Capture());
+
+        Assert.True(File.Exists(Path.Combine(store.Path, "manifest.json")), "the backup has to be finished and loadable");
+        Assert.Contains(log.Warnings, w => w.Contains("license keys", StringComparison.OrdinalIgnoreCase));
+    }
 }
