@@ -10,8 +10,18 @@ public sealed class MachineInfo
 }
 
 /// <summary>A Windows user profile (C:\Users\name) found on a machine.</summary>
-public sealed class UserProfileInfo
+public sealed partial class UserProfileInfo
 {
+    /// <summary>
+    /// Accounts Windows makes for itself: defaultuser0 and defaultuser100000 (left over from first-time setup)
+    /// and the Application Guard account. Nobody uses them.
+    /// </summary>
+    public static bool IsSetupAccount(string? name) =>
+        name is not null && (SetupAccount().IsMatch(name) || name.Equals("WDAGUtilityAccount", StringComparison.OrdinalIgnoreCase));
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^defaultuser\d+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex SetupAccount();
+
     public required string UserName { get; init; }
     public required string Sid { get; init; }
     public required string ProfilePath { get; init; }

@@ -48,6 +48,30 @@ internal static partial class UserSettingsIO
         return new Captured(settings, wallpaper);
     }
 
+    /// <summary>Registry names of the personal folders people move (to OneDrive, another drive, a server), and our folder name for each.</summary>
+    internal static readonly (string Value, string Folder)[] KnownFolders =
+    [
+        ("Desktop", "Desktop"), ("Personal", "Documents"), ("My Pictures", "Pictures"), ("My Music", "Music"),
+        ("My Video", "Videos"), ("{374DE290-123F-4565-9164-39C4925E467B}", "Downloads"), ("Favorites", "Favorites"),
+    ];
+
+    /// <summary>Where each personal folder really is (as the old PC saw it, e.g. D:\Data\Docs), keyed by our folder name.</summary>
+    public static Dictionary<string, string> ShellFolders(UserProfileInfo user, IMigrationLog log, OfflinePaths? offline = null)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var hive = UserHive.Open(user, writable: false, log, offline);
+        using var key = hive?.Root.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders");
+        if (key is null) return result;
+        foreach (var (value, folder) in KnownFolders)
+        {
+            if (key.GetValue(value, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not string raw || raw.Length == 0) continue;
+            var path = raw.Replace("%USERPROFILE%", user.ProfilePath, StringComparison.OrdinalIgnoreCase);
+            path = offline?.Expand(path) ?? Environment.ExpandEnvironmentVariables(path);
+            result[folder] = path.TrimEnd('\\');
+        }
+        return result;
+    }
+
     public static void Write(UserProfileInfo user, UserSettings settings, string? wallpaperFile, bool isCurrentUser, IMigrationLog log)
     {
         using var hive = UserHive.Open(user, writable: true, log);

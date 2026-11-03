@@ -45,7 +45,7 @@ public sealed class WindowsSystemProbe(IMigrationLog log) : ISystemProbe
             using var key = list.OpenSubKey(sid);
             if (key?.GetValue("ProfileImagePath") is not string raw) continue;
             var path = Environment.ExpandEnvironmentVariables(raw);
-            if (!Directory.Exists(path)) continue;
+            if (!Directory.Exists(path) || UserProfileInfo.IsSetupAccount(Path.GetFileName(path))) continue;
 
             result.Add(new UserProfileInfo { UserName = Path.GetFileName(path), Sid = sid, ProfilePath = path });
         }

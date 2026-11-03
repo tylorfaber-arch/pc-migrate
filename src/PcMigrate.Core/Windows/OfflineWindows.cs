@@ -168,13 +168,13 @@ public sealed class OfflineWindows : IDisposable
 
     private static List<string> ProfileFolders(string root)
     {
-        string[] skip = ["Public", "Default", "Default User", "All Users", "defaultuser0", "WDAGUtilityAccount"];
+        string[] skip = ["Public", "Default", "Default User", "All Users"];
         try
         {
             return Directory.GetDirectories(Path.Combine(root, "Users"))
                 .Where(d => File.Exists(Path.Combine(d, "NTUSER.DAT")))
                 .Select(Path.GetFileName)
-                .Where(n => n is not null && !skip.Contains(n, StringComparer.OrdinalIgnoreCase))
+                .Where(n => n is not null && !skip.Contains(n, StringComparer.OrdinalIgnoreCase) && !Models.UserProfileInfo.IsSetupAccount(n))
                 .Select(n => n!)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .ToList();

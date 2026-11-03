@@ -41,7 +41,7 @@ public sealed class OfflineSystemProbe(OfflineWindows drive, IMigrationLog log) 
             using var key = list.OpenSubKey(sid);
             if (key?.GetValue("ProfileImagePath", null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not string raw) continue;
             var path = drive.Paths.Expand(raw);
-            if (!Directory.Exists(drive.Paths.ToReadable(path))) continue;
+            if (!Directory.Exists(drive.Paths.ToReadable(path)) || UserProfileInfo.IsSetupAccount(Path.GetFileName(path.TrimEnd('\\')))) continue;
             result.Add(new UserProfileInfo { UserName = Path.GetFileName(path.TrimEnd('\\')), Sid = sid, ProfilePath = path });
         }
         return result.OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase).ToList();

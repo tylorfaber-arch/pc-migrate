@@ -58,9 +58,12 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
             long files = 0, bytes = 0;
             // Problems reading one file are warnings; a SinkWriteException (drive full,
             // network dropped) is not caught here and stops the capture.
+            var added = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             async Task<bool> AddFile(string fullPath, string storePath, DateTime lastWriteUtc)
             {
                 ct.ThrowIfCancellationRequested();
+                // The same file reached twice (a moved folder inside another one): keep the first.
+                if (!added.Add(storePath)) return false;
                 if (!StorePath.IsSafe(storePath))
                 {
                     Warn($"Skipped file with an unusual name: {fullPath}");
@@ -86,11 +89,11 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
 
             // Program settings folders ride along with each person's files.
             var appFolders = options.Apps.Where(a => a.Method != AppMethod.Manual).SelectMany(a => a.SettingsFolders);
-            var folders = options.Rules.ProfileFolders.Concat(appFolders).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-
             foreach (var user in users)
             {
                 log.Info($"Copying files for {user.UserName}...");
+                var folders = options.Rules.FoldersFor(mapPath(user.ProfilePath)).Concat(appFolders).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var cloudOnly = 0;
                 foreach (var folder in folders)
                 {
                     var source = mapPath(Path.Combine(user.ProfilePath, folder.Replace('/', Path.DirectorySeparatorChar)));
@@ -100,10 +103,35 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
                         await AddFile(source, StorePath.Combine(StorePath.UsersRoot, user.UserName, folder), File.GetLastWriteTimeUtc(source));
                         continue;
                     }
-                    foreach (var file in FileCollector.Enumerate(source, folder, options.Rules, Warn))
+                    foreach (var file in FileCollector.Enumerate(source, folder, options.Rules, Warn, _ => cloudOnly++))
                         await AddFile(file.FullPath, StorePath.Combine(StorePath.UsersRoot, user.UserName, file.RelativePath), file.LastWriteUtc);
                 }
+
+                // Desktop, Documents and the rest may have been moved off the profile (another drive, OneDrive).
+                foreach (var (folder, path) in MovedFolders(user, offline))
+                {
+                    if (path.StartsWith(@"\\", StringComparison.Ordinal))
+                    {
+                        Warn($"{user.UserName}'s {folder} folder is on a network share ({path}), so it wasn't copied. It's still on the server.");
+                        continue;
+                    }
+                    // On a pulled drive only the old C: is here; another letter would be some other drive on this PC.
+                    if (offline is not null && !path.StartsWith(offline.SystemDrive + "\\", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Warn($"{user.UserName}'s {folder} folder was on another drive of the old PC ({path}), so it isn't on this one. Copy it from that drive by hand.");
+                        continue;
+                    }
+                    log.Info($"{user.UserName}'s {folder} folder was moved to {path}; copying it from there...");
+                    foreach (var file in FileCollector.Enumerate(mapPath(path), folder, options.Rules, Warn, _ => cloudOnly++))
+                        await AddFile(file.FullPath, StorePath.Combine(StorePath.UsersRoot, user.UserName, file.RelativePath), file.LastWriteUtc);
+                }
+
+                if (cloudOnly > 0)
+                    Warn($"{cloudOnly:N0} of {user.UserName}'s files were online-only (OneDrive kept them in the cloud, not on this drive). " +
+                         "They're still in their OneDrive and come back when they sign in to OneDrive on the new PC.");
             }
+
+            ReportFoldersLeftBehind(offline, mapPath, Warn);
 
             if (options.Apps.Count > 0)
                 await new AppCapture(apps, log, Warn).RunAsync(options.Apps, users, manifest, mapPath, AddFile, sink, ct);
@@ -115,6 +143,8 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
             else if (options.IncludeWifi && OperatingSystem.IsWindows())
                 await CaptureWifiAsync(sink, manifest, Warn, ct);
 
+            foreach (var app in manifest.Apps.Where(a => a.Method == AppMethod.Manual))
+                log.Info($"To install by hand: {app.Name} ({app.Reason})");
             log.Info($"Captured {files:N0} files ({FormatBytes(bytes)}). Writing manifest...");
             await sink.CompleteAsync(manifest, ct);
             var manual = manifest.Apps.Count(a => a.Method == AppMethod.Manual);
@@ -262,11 +292,64 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         }
     }
 
+    /// <summary>Personal folders that point outside the profile, as the old PC saw them. Ones inside the profile (OneDrive\Documents) are already copied.</summary>
+    private IEnumerable<(string Folder, string Path)> MovedFolders(UserProfileInfo user, OfflinePaths? offline)
+    {
+        if (!OperatingSystem.IsWindows()) return [];
+        var profile = user.ProfilePath.TrimEnd('\\') + "\\";
+        return UserSettingsIO.ShellFolders(user, log, offline)
+            .Where(kv => !(kv.Value + "\\").StartsWith(profile, StringComparison.OrdinalIgnoreCase))
+            .Select(kv => (kv.Key, kv.Value));
+    }
+
+    /// <summary>Windows' own folders at the top of the system drive. Anything else there was made by a person or a program.</summary>
+    private static readonly HashSet<string> SystemRootFolders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Windows", "Program Files", "Program Files (x86)", "ProgramData", "Users", "$Recycle.Bin", "System Volume Information",
+        "Recovery", "PerfLogs", "Documents and Settings", "Config.Msi", "MSOCache", "OneDriveTemp", "Windows.old", "inetpub",
+        "Intel", "AMD", "NVIDIA", "Dell", "HP", "Lenovo", "drivers", "SWSetup", "ESD", "XboxGames", "Boot", "EFI", "temp", "tmp",
+    };
+
+    /// <summary>Warns about sizeable folders outside anyone's profile, which aren't copied, so nothing is left behind silently.</summary>
+    private static void ReportFoldersLeftBehind(OfflinePaths? offline, Func<string, string> mapPath, Action<string> warn)
+    {
+        var root = offline is not null ? offline.SystemDrive + "\\" : Path.GetPathRoot(Environment.SystemDirectory);
+        if (string.IsNullOrEmpty(root) || !OperatingSystem.IsWindows()) return;
+        var candidates = new List<string>();
+        try
+        {
+            candidates.AddRange(Directory.EnumerateDirectories(mapPath(root))
+                .Where(d => !SystemRootFolders.Contains(Path.GetFileName(d)) && !Path.GetFileName(d).StartsWith('$'))
+                .Select(d => Path.Combine(root, Path.GetFileName(d))));
+            var publicDir = Path.Combine(root, "Users", "Public");
+            if (Directory.Exists(mapPath(publicDir)))
+                candidates.AddRange(Directory.EnumerateDirectories(mapPath(publicDir))
+                    .Where(d => Path.GetFileName(d) is not ("Desktop" or "Libraries" or "AccountPictures"))
+                    .Select(d => Path.Combine(publicDir, Path.GetFileName(d))));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+
+        var left = new List<string>();
+        foreach (var dir in candidates)
+        {
+            long size = 0;
+            try
+            {
+                size = new DirectoryInfo(mapPath(dir)).EnumerateFiles("*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint })
+                    .Sum(f => f.Length);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            if (size >= 1024 * 1024) left.Add($"{dir} ({FormatBytes(size)})");
+        }
+        if (left.Count > 0)
+            warn($"Not copied because they're outside everyone's user folder: {string.Join(", ", left)}. Copy them by hand if they're needed.");
+    }
+
     /// <summary>How many files and bytes a capture of this user would copy.</summary>
     public static (long Files, long Bytes) Estimate(UserProfileInfo user, CaptureRules rules, CancellationToken ct = default, OfflinePaths? offline = null)
     {
         long files = 0, bytes = 0;
-        foreach (var folder in rules.ProfileFolders)
+        foreach (var folder in rules.FoldersFor(offline?.ToReadable(user.ProfilePath) ?? user.ProfilePath))
         {
             var path = Path.Combine(user.ProfilePath, folder.Replace('/', Path.DirectorySeparatorChar));
             if (offline is not null) path = offline.ToReadable(path);
