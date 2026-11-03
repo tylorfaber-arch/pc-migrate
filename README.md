@@ -111,6 +111,16 @@ screwdriver needed. The stick is built from the PC's own Windows recovery enviro
 is downloaded from Microsoft and Secure Boot doesn't block it. Sticks of 8 GB or more get a second
 part (PCM-DATA) to save backups on. Start a PC from it with its boot menu key (F12 on most, F9 on HP).
 
+**Get deleted files back.** **Tools → Get deleted files back** (or `pcmigrate-cli undelete --drive E:`)
+reads an NTFS drive's file table directly and lists files that were deleted, even after the Recycle Bin
+was emptied, with where they were, their size and date. Each is marked by how likely it is to come
+back whole: whether the space it used has since been taken by newer files. Search by name or folder,
+tick the ones wanted (or all matches) and recover them to a folder on a *different* drive, so nothing
+is written over what's being recovered; they come back in their old folders. Nothing is written to the
+searched drive. The sooner after deleting the better, and stop using the drive meanwhile. SSDs with TRIM
+(most internal SSDs) usually wipe deleted space within minutes, so this works best on hard drives, USB
+sticks and memory cards. On the command line add `--find invoice`, `--good-only` and `--to F:\Recovered`.
+
 `pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
@@ -289,4 +299,5 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 11. Rescue USB ← done
 12. Scheduled backups ← done
 13. Technician mode and client reports ← done
-14. Licensing, installer and a place to sell it
+14. Deleted file recovery (NTFS) ← done
+15. Licensing, installer and a place to sell it
