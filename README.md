@@ -121,6 +121,14 @@ searched drive. The sooner after deleting the better, and stop using the drive m
 (most internal SSDs) usually wipe deleted space within minutes, so this works best on hard drives, USB
 sticks and memory cards. On the command line add `--find invoice`, `--good-only` and `--to F:\Recovered`.
 
+**Duplicate files.** **Tools → Duplicate files** (or `pcmigrate-cli duplicates`) finds files that
+are exactly the same inside, whatever they're called, in everyone's folders or the folders you pick.
+Each set shows which copy it suggests keeping (the oldest, not in Downloads, not named like a copy)
+with the extra copies ticked; untick anything to keep. Removed copies go to the Recycle Bin, at least
+one copy of every file is always kept, and a copy that changed since the search is left alone.
+Windows' and programs' own folders are never searched. On the command line: `--in <folder>` (repeatable),
+`--min-mb 10`, and `--remove` to move the extra copies to the Recycle Bin.
+
 `pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
@@ -300,4 +308,5 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 12. Scheduled backups ← done
 13. Technician mode and client reports ← done
 14. Deleted file recovery (NTFS) ← done
-15. Licensing, installer and a place to sell it
+15. Duplicate file finder ← done
+16. Licensing, installer and a place to sell it

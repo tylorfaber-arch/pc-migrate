@@ -112,6 +112,7 @@ async Task<int> Run(string[] argv)
             "backup" => await Backup(),
             "tech" => Technician(),
             "undelete" => Undelete(),
+            "duplicates" => Duplicates(),
             "schedule" => await ScheduleBackup(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
@@ -465,6 +466,43 @@ async Task<int> Run(string[] argv)
         return Done($"Recovered {outcome.Recovered:N0} file(s) ({CaptureEngine.FormatBytes(outcome.Bytes)}) to {target}. {outcome.Failed:N0} couldn't be recovered.", outcome.Problems.Count);
     }
 
+    int Duplicates()
+    {
+        var folders = cli.GetAll("in").ToList();
+        var minMb = cli.Get("min-mb");
+        var remove = cli.Flag("remove");
+        var yes = cli.Flag("yes");
+        cli.RejectUnknown();
+        if (folders.Count == 0)
+            folders = Directory.GetDirectories(@"C:\Users").Where(d => !Path.GetFileName(d).Equals("Public", StringComparison.OrdinalIgnoreCase)
+                && !Path.GetFileName(d).StartsWith("Default", StringComparison.OrdinalIgnoreCase) && !Path.GetFileName(d).Equals("All Users", StringComparison.OrdinalIgnoreCase)).ToList();
+        var options = new PcMigrate.Core.Cleanup.DuplicateFinder.Options { MinSize = (long)((minMb is null ? 1 : double.Parse(minMb, System.Globalization.CultureInfo.InvariantCulture)) * 1024 * 1024) };
+        log.Info($"Looking for duplicate files in {string.Join(", ", folders)}...");
+        var groups = PcMigrate.Core.Cleanup.DuplicateFinder.Find(folders, options, null, cts.Token);
+        foreach (var g in groups.Take(remove ? 20 : 200))
+        {
+            Console.WriteLine($"{CaptureEngine.FormatBytes(g.Size)} x {g.Copies.Count}:");
+            Console.WriteLine($"  keep    {g.Keep}");
+            foreach (var c in g.Copies.Skip(1)) Console.WriteLine($"  extra   {c.Path}");
+        }
+        var wasted = groups.Sum(g => g.Wasted);
+        Console.WriteLine($"{groups.Count:N0} file(s) have duplicates; removing the extra copies would free {CaptureEngine.FormatBytes(wasted)}.");
+        if (!remove || groups.Count == 0)
+        {
+            if (groups.Count > 0) Console.WriteLine("Add --remove to move the extra copies to the Recycle Bin (the one marked keep stays).");
+            return 0;
+        }
+        if (!yes)
+        {
+            Console.Write($"Move {groups.Sum(g => g.Copies.Count - 1):N0} extra copies to the Recycle Bin? Type yes: ");
+            if (!string.Equals(Console.ReadLine()?.Trim(), "yes", StringComparison.OrdinalIgnoreCase)) return Fail("Nothing was removed.");
+        }
+        var chosen = groups.SelectMany(g => g.Copies.Skip(1).Select(c => c.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = PcMigrate.Core.Cleanup.DuplicateFinder.Remove(groups, chosen, RecycleBin.Send, cts.Token);
+        foreach (var p in result.Problems.Take(50)) log.Warn(p);
+        return Done($"Moved {result.Removed:N0} extra copies to the Recycle Bin, freeing {CaptureEngine.FormatBytes(result.Freed)} once it's emptied.", result.Problems.Count);
+    }
+
     int Technician()
     {
         var off = cli.Flag("off");
@@ -762,6 +800,9 @@ async Task<int> Run(string[] argv)
               pcmigrate-cli undelete --drive E: [--find "photos"] [--good-only] [--to F:\Recovered]
                                            Find deleted files on an NTFS drive; with --to, copy them back out
                                            (to a different drive). Nothing is written to the drive searched.
+              pcmigrate-cli duplicates [--in <folder>]... [--min-mb 1] [--remove] [--yes]
+                                           Find files that are exactly the same (default: everyone's folders).
+                                           --remove moves the extra copies to the Recycle Bin, keeping one.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):
