@@ -99,6 +99,15 @@ public class DuplicateTests
         Assert.Equal(copy, DuplicateFinder.LooksLikeACopy(path));
 
     [Fact]
+    public void Downloads_and_temp_are_judged_inside_the_searched_folder()
+    {
+        var root = @"C:\Users\Sam\AppData\Local\Temp\job";
+        List<DuplicateCopy> copies = [new(root + @"\Downloads\beach (1).jpg", new DateTime(2019, 1, 1)), new(root + @"\Pictures\beach.jpg", new DateTime(2020, 1, 1))];
+        // The whole search is inside Temp; only the Downloads copy looks like a copy within it.
+        Assert.EndsWith(@"Pictures\beach.jpg", DuplicateFinder.SortKeepFirst(copies, p => p[root.Length..])[0].Path);
+    }
+
+    [Fact]
     public void Program_folders_inside_the_search_are_skipped()
     {
         using var dir = new TempDir();
