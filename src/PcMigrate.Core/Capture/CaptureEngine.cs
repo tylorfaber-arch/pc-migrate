@@ -131,7 +131,7 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
                          "They're still in their OneDrive and come back when they sign in to OneDrive on the new PC.");
             }
 
-            ReportFoldersLeftBehind(offline, mapPath, Warn);
+            ReportFoldersLeftBehind(inventory.Users, mapPath, Warn);
 
             if (options.Apps.Count > 0)
                 await new AppCapture(apps, log, Warn).RunAsync(options.Apps, users, manifest, mapPath, AddFile, sink, ct);
@@ -297,7 +297,8 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
     {
         if (!OperatingSystem.IsWindows()) return [];
         var profile = user.ProfilePath.TrimEnd('\\') + "\\";
-        return UserSettingsIO.ShellFolders(user, log, offline)
+        // Quietly: a person whose registry can't be opened is already reported by the settings step.
+        return UserSettingsIO.ShellFolders(user, NullLog.Instance, offline)
             .Where(kv => !(kv.Value + "\\").StartsWith(profile, StringComparison.OrdinalIgnoreCase))
             .Select(kv => (kv.Key, kv.Value));
     }
@@ -311,10 +312,13 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
     };
 
     /// <summary>Warns about sizeable folders outside anyone's profile, which aren't copied, so nothing is left behind silently.</summary>
-    private static void ReportFoldersLeftBehind(OfflinePaths? offline, Func<string, string> mapPath, Action<string> warn)
+    private static void ReportFoldersLeftBehind(List<UserProfileInfo> users, Func<string, string> mapPath, Action<string> warn)
     {
-        var root = offline is not null ? offline.SystemDrive + "\\" : Path.GetPathRoot(Environment.SystemDirectory);
-        if (string.IsNullOrEmpty(root) || !OperatingSystem.IsWindows()) return;
+        // The drive the profiles are on, as the old PC saw it: C:\Users\sam → C:\.
+        var usersDir = users.Select(u => Path.GetDirectoryName(u.ProfilePath.TrimEnd('\\', '/')))
+            .FirstOrDefault(d => d is not null && Path.GetFileName(d).Equals("Users", StringComparison.OrdinalIgnoreCase));
+        var root = usersDir is null ? null : Path.GetDirectoryName(usersDir);
+        if (string.IsNullOrEmpty(root)) return;
         var candidates = new List<string>();
         try
         {
