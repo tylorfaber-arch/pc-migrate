@@ -101,6 +101,7 @@ async Task<int> Run(string[] argv)
         {
             "drives" => Drives(),
             "keys" => Keys(),
+            "health" => Health(),
             "disks" => ListDisks(),
             "clone" => await CloneDisk(),
             "update" => await SelfUpdate(),
@@ -206,6 +207,19 @@ async Task<int> Run(string[] argv)
         Console.WriteLine();
         Updater.Swap(exePath, downloaded);
         return Done($"Updated to {update.Tag.TrimStart('v')}. Run pcmigrate-cli again to use it.", 0);
+    }
+
+    int Health()
+    {
+        var reports = HealthReader.All();
+        foreach (var h in reports)
+        {
+            Console.WriteLine($"Disk {h.DiskNumber}  {h.Model}  [{h.Level}]");
+            Console.WriteLine("  " + h.Summary);
+            foreach (var d in h.Details) Console.WriteLine("  - " + d);
+        }
+        if (reports.Count == 0) Console.WriteLine("No drives found.");
+        return reports.Any(h => h.Level == PcMigrate.Core.Health.HealthLevel.Failing) ? 2 : 0;
     }
 
     int Keys()
@@ -453,6 +467,7 @@ async Task<int> Run(string[] argv)
 
             Other commands:
               pcmigrate-cli scan [--json]  List users, how much would be copied, and installed programs.
+              pcmigrate-cli health         Check each drive's health (SMART) before rescuing or cloning it.
               pcmigrate-cli keys           Show Windows, Office and program license keys (add --from-drive E: for a dead PC's drive).
               pcmigrate-cli version
               pcmigrate-cli disks          List the physical disks and their partitions.
