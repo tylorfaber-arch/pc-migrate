@@ -33,6 +33,9 @@ public static class DuplicateFinder
     {
         options ??= new Options();
         var bySize = new Dictionary<long, List<FileInfo>>();
+        // Which searched folder each file was found under, so "in Downloads" is judged inside the
+        // search, not by where the searched folder itself happens to be.
+        var foundUnder = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var count = 0;
         foreach (var folder in folders.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -55,6 +58,7 @@ public static class DuplicateFinder
                 try { info = new FileInfo(path); if (info.Length < Math.Max(1, options.MinSize)) continue; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
                 if (!bySize.TryGetValue(info.Length, out var list)) bySize[info.Length] = list = [];
+                foundUnder[info.FullName] = Path.TrimEndingDirectorySeparator(folder);
                 list.Add(info);
                 if (++count % 500 == 0) progress?.Report((count, path));
             }
@@ -72,7 +76,7 @@ public static class DuplicateFinder
                 foreach (var same in full.Where(g => g.Key is not null && g.Count() > 1))
                 {
                     var copies = same.Select(f => new DuplicateCopy(f.FullName, f.LastWriteTime)).ToList();
-                    groups.Add(new DuplicateGroup(size, same.Key!, SortKeepFirst(copies)));
+                    groups.Add(new DuplicateGroup(size, same.Key!, SortKeepFirst(copies, c => foundUnder.TryGetValue(c, out var root) ? c[root.Length..] : c)));
                 }
             }
         }
@@ -83,8 +87,8 @@ public static class DuplicateFinder
     /// Puts the copy most worth keeping first: not in Downloads or a temp folder, not named like a
     /// copy ("(1)", "- Copy"), then the oldest (usually the original), then the shortest path.
     /// </summary>
-    internal static List<DuplicateCopy> SortKeepFirst(List<DuplicateCopy> copies) =>
-        copies.OrderBy(c => LooksLikeACopy(c.Path) ? 1 : 0)
+    internal static List<DuplicateCopy> SortKeepFirst(List<DuplicateCopy> copies, Func<string, string>? inSearch = null) =>
+        copies.OrderBy(c => LooksLikeACopy((inSearch ?? (x => x))(c.Path)) ? 1 : 0)
               .ThenBy(c => c.Modified)
               .ThenBy(c => c.Path.Length)
               .ThenBy(c => c.Path, StringComparer.OrdinalIgnoreCase)
