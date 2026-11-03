@@ -423,6 +423,7 @@ footer .grow { flex: 1; }
       <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
       <button class="btn ghost" data-go="undelete"><svg><use href="#i-hdd"/></svg>Get deleted files back</button>
       <button class="btn ghost" data-go="dups"><svg><use href="#i-folder"/></svg>Duplicate files</button>
+      <button class="btn ghost" data-go="wipe"><svg><use href="#i-x"/></svg>Secure wipe</button>
       <button class="btn ghost" data-go="tech"><svg><use href="#i-key"/></svg>Technician mode</button>
     </div>
   </section>
@@ -605,6 +606,42 @@ footer .grow { flex: 1; }
       <div class="del-list" id="dupList"></div>
     </div>
     <div class="actions"><span class="muted" id="dupNote"></span><span class="spacer"></span><button class="btn" id="dupScan">Search</button><button class="btn" id="dupGo" style="display:none" disabled>Remove</button></div>
+  </section>
+
+  <!-- SECURE WIPE -->
+  <section class="screen" id="s-wipe">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Secure wipe</h1><p>Overwrites data so nobody can get it back, not even with recovery tools. For selling or giving away a PC or drive, or getting rid of private files for good.</p></div>
+    <div class="seg" id="wipeMode">
+      <button data-mode="disk" class="on">Whole drive</button>
+      <button data-mode="files">Files and folders</button>
+      <button data-mode="free">Free space</button>
+    </div>
+    <div class="card" id="wipeDiskCard">
+      <div class="card-head"><h2>Drive to wipe</h2><span class="spacer"></span><button class="btn ghost" id="wipeRefresh">Look again</button></div>
+      <div class="rows" id="wipeDisks"></div>
+      <div id="wipeLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for drives…</div>
+      <label class="toggle-row"><input type="checkbox" class="check" id="wipeBlank"><div class="grow"><div>Leave it completely blank</div><div class="sub">Off: afterwards it's set up as one empty drive, ready to use</div></div></label>
+    </div>
+    <div class="card" id="wipeFilesCard" style="display:none">
+      <div class="card-head"><h2>Files and folders to wipe</h2><span class="spacer"></span><button class="btn ghost" id="wipeAddFiles">Add files…</button><button class="btn ghost" id="wipeAddFolder">Add a folder…</button></div>
+      <div id="wipeFiles"></div>
+    </div>
+    <div class="card" id="wipeFreeCard" style="display:none">
+      <h2>Drive whose free space to wipe</h2>
+      <p class="muted" style="margin:0 0 8px">Files on the drive stay. Only the empty space is overwritten, where deleted files can otherwise still be recovered from. Takes a long time on a big drive.</p>
+      <div class="rows" id="wipeVolumes"></div>
+    </div>
+    <div class="card" id="wipePassCard">
+      <div class="toggle-row" style="gap:10px;padding:0"><div class="grow"><div>How thoroughly</div><div class="sub">One pass is enough for any drive made this century; three is for extra peace of mind and takes three times as long.</div></div>
+        <select id="wipePasses"><option value="1" selected>One pass</option><option value="3">Three passes</option></select></div>
+    </div>
+    <div id="wipeNote"></div>
+    <div class="erase-box" id="wipeErase" style="display:none">
+      <div><b id="wipeEraseText"></b> This can't be undone. Type <b>ERASE</b> to confirm.</div>
+      <input type="text" id="wipeEraseInput" autocomplete="off" spellcheck="false" placeholder="ERASE">
+    </div>
+    <div class="actions"><span class="spacer"></span><button class="btn danger" id="wipeGo" disabled>Wipe</button></div>
   </section>
 
   <!-- LICENSE KEYS -->
@@ -915,6 +952,7 @@ function show(name) {
   if (name === "tech") loadTech();
   if (name === "undelete") loadVolumes();
   if (name === "dups") loadDupFolders();
+  if (name === "wipe") loadWipe();
   if (name === "old-what" || name === "new-review") document.querySelectorAll(".job-card").forEach(c => c.style.display = tech.enabled ? "" : "none");
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
@@ -1483,6 +1521,85 @@ $("dupGo").addEventListener("click", async () => {
   } catch (e) { showError(e); }
 });
 
+// ----- secure wipe -----
+let wipeMode = "disk", wipeDiskList = [], wipeDisk = null, wipeCheckResult = null, wipePaths = [], wipeVols = [], wipeVol = null;
+async function loadWipe() {
+  setWipeMode(wipeMode);
+  wipeDisk = null; wipeCheckResult = null; $("wipeDisks").innerHTML = ""; $("wipeLooking").style.display = "flex";
+  try { wipeDiskList = await call("listDisks"); } catch (e) { wipeDiskList = []; toast(e.message); }
+  $("wipeLooking").style.display = "none";
+  try { wipeVols = await call("listVolumes"); } catch (e) { wipeVols = []; }
+  renderWipe();
+}
+function setWipeMode(m) {
+  wipeMode = m; $("wipeEraseInput").value = "";
+  $("wipeMode").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  $("wipeDiskCard").style.display = m === "disk" ? "" : "none";
+  $("wipeFilesCard").style.display = m === "files" ? "" : "none";
+  $("wipeFreeCard").style.display = m === "free" ? "" : "none";
+  $("wipePassCard").style.display = m === "free" ? "none" : "";
+  renderWipe();
+}
+$("wipeMode").querySelectorAll("button").forEach(b => b.addEventListener("click", () => setWipeMode(b.dataset.mode)));
+function renderWipe() {
+  $("wipeDisks").innerHTML = wipeDiskList.length ? wipeDiskList.map(d => diskRow(d, wipeDisk === d.number, d.isSystem ? "Windows is running from this drive, so it can't be wiped from here. Use the rescue USB." : null)).join("")
+    : `<p class="muted" style="padding:6px 0">No drives found.</p>`;
+  $("wipeDisks").querySelectorAll(".disk-row:not(.off)").forEach(el => el.addEventListener("click", async () => {
+    wipeDisk = +el.dataset.n; wipeCheckResult = null; $("wipeEraseInput").value = ""; renderWipe();
+    try { wipeCheckResult = await call("wipeCheck", { disk: wipeDisk }); } catch (e) { toast(e.message); }
+    renderWipe();
+  }));
+  $("wipeFiles").innerHTML = wipePaths.length ? wipePaths.map((f, i) => `<div class="folder-row"><svg width="18" height="18"><use href="#i-folder"/></svg><span class="p">${esc(f)}</span><button class="btn ghost" data-rm="${i}" style="padding:4px 10px">Remove</button></div>`).join("")
+    : `<p class="muted" style="padding:6px 0">Nothing added yet.</p>`;
+  $("wipeFiles").querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", () => { wipePaths.splice(+b.dataset.rm, 1); renderWipe(); }));
+  $("wipeVolumes").innerHTML = wipeVols.map(v => `<div class="row pc-row disk-row ${wipeVol === v.letter ? "sel" : ""}" data-l="${esc(v.letter)}">
+      <div class="avatar" style="border-radius:10px"><svg width="20" height="20"><use href="#i-hdd"/></svg></div>
+      <div class="grow"><div class="name">${esc(v.letter)}: ${esc(v.label || "Local disk")} <span class="faint" style="font-weight:400">(${fmtBytes(v.size)})</span></div><div class="sub">${fmtBytes(v.free)} free to overwrite</div></div>
+      ${wipeVol === v.letter ? '<span class="pill ok">Selected</span>' : ""}</div>`).join("");
+  $("wipeVolumes").querySelectorAll(".disk-row").forEach(el => el.addEventListener("click", () => { wipeVol = el.dataset.l; renderWipe(); }));
+
+  const d = wipeDiskList.find(x => x.number === wipeDisk);
+  const note = wipeMode === "disk" && wipeCheckResult && (wipeCheckResult.problem || wipeCheckResult.note);
+  $("wipeNote").innerHTML = note ? `<div class="problem" style="margin:0 0 14px">${esc(note)}</div>` : "";
+  const target = wipeMode === "disk" ? (d && !(wipeCheckResult && wipeCheckResult.problem) ? `Everything on ${d.model} (${fmtBytes(d.size)}${d.letters.length ? ", " + d.letters.join(" ") : ""}) will be overwritten.` : null)
+    : wipeMode === "files" ? (wipePaths.length ? `${wipePaths.length} ${wipePaths.length === 1 ? "item" : "items"} will be overwritten and deleted, including everything inside folders.` : null) : null;
+  $("wipeErase").style.display = target ? "" : "none";
+  if (target) $("wipeEraseText").textContent = target;
+  const ready = wipeMode === "free" ? !!wipeVol : !!target && $("wipeEraseInput").value.trim() === "ERASE";
+  $("wipeGo").disabled = !ready;
+  $("wipeGo").textContent = wipeMode === "disk" ? "Wipe the drive" : wipeMode === "files" ? "Wipe them" : "Wipe free space";
+}
+$("wipeEraseInput").addEventListener("input", renderWipe);
+$("wipeRefresh").addEventListener("click", loadWipe);
+$("wipeAddFiles").addEventListener("click", async () => { try { const r = await call("pickFiles"); if (r) { r.forEach(f => wipePaths.includes(f) || wipePaths.push(f)); renderWipe(); } } catch (e) { toast(e.message); } });
+$("wipeAddFolder").addEventListener("click", async () => { try { const r = await call("pickImageFolder", { title: "Choose a folder to wipe (everything in it goes)" }); if (r && !wipePaths.includes(r.path)) { wipePaths.push(r.path); renderWipe(); } } catch (e) { toast(e.message); } });
+$("wipeGo").addEventListener("click", async () => {
+  const passes = +$("wipePasses").value;
+  $("wipeEraseInput").value = "";
+  try {
+    if (wipeMode === "disk") {
+      const d = wipeDiskList.find(x => x.number === wipeDisk);
+      startProgress("Wiping the drive", d.size * passes, { files: false });
+      $("progSub").textContent = "This takes a while: about an hour per 500 GB per pass on a hard drive. Leave it plugged in.";
+      const r = await call("wipeDisk", { disk: wipeDisk, passes, blank: $("wipeBlank").checked });
+      showDone({ title: "Drive wiped", sub: `${d.model} was overwritten and checked: it reads back as nothing but zeros.${r.letter ? ` It's now an empty drive ${r.letter}:.` : ""}`,
+        stats: [["Overwritten", fmtBytes(r.bytes)], ["Passes", passes], ["Took", fmtTime(r.seconds)]], warnings: r.notes || [], logPath: r.logPath });
+    } else if (wipeMode === "files") {
+      startProgress("Wiping files", 0);
+      const r = await call("wipeFiles", { paths: wipePaths, passes });
+      wipePaths = [];
+      showDone({ title: "Files wiped", sub: "They were overwritten before being deleted, so they can't be recovered (on an SSD, the drive itself may keep old copies in spare space; wiping its free space helps).",
+        stats: [["Files", fmtNum(r.files)], ["Size", fmtBytes(r.bytes)], ["Left", fmtNum((r.problems || []).length)]], warnings: r.problems || [] });
+    } else {
+      if (!confirm(`Overwrite the free space on ${wipeVol}:? Files on it stay; this can take hours.`)) return;
+      startProgress(`Wiping the free space on ${wipeVol}:`, 0, { stats: false });
+      await call("wipeFree", { letter: wipeVol });
+      showDone({ title: "Free space wiped", sub: `Files deleted from ${wipeVol}: in the past can't be recovered now. The files still on it weren't touched.`, stats: [["Drive", wipeVol + ":"]] });
+    }
+  } catch (e) { showError(e); }
+  $("progSub").textContent = "You can keep using the PC while this runs.";
+});
+
 function leaveDrive() {
   state.pulled = null; state.info = state.here; state.sizes = {}; appPlans = null;
   $("pcLabel").textContent = "This PC"; $("pcName").textContent = state.here.computerName;
@@ -1934,6 +2051,12 @@ const Mock = {
         return reply({ groups: list.length, wasted: list.reduce((a, x) => a + x.wasted, 0), list }, 1800);
       }
       case "removeDuplicates": return reply({ removed: args.paths.length, freed: 5.0e9, problems: [] }, 1200);
+      case "wipeCheck": return reply({ problem: null, note: args.disk === 1 ? null : "This looks like an SSD. Overwriting it makes the data unreadable by normal means, but SSDs keep spare space that can't be overwritten from Windows. For the strongest wipe, also use the maker's tool's Secure Erase." }, 200);
+      case "pickFiles": return reply(["C:\\Users\\tylor\\Documents\\passwords.xlsx", "C:\\Users\\tylor\\Desktop\\bank statement.pdf"]);
+      case "wipeDisk": { const total = 1e12; let b = 0; const t = setInterval(() => { b += total / 40; receive({ event: "progress", files: 0, bytes: b, path: "Crucial MX500" }); if (b >= total) clearInterval(t); }, 120);
+        return reply({ letter: args.blank ? null : "G", bytes: 2e12 * args.passes, seconds: 14400, notes: [], logPath: "C:\\ProgramData\\pc-migrate\\wipe.log" }, 5200); }
+      case "wipeFiles": return reply({ files: 214, bytes: 1.4e9, problems: [] }, 1500);
+      case "wipeFree": return reply({ letter: args.letter }, 1500);
       case "pickImageFolder": return reply({ path: "E:\\Images", freeBytes: 640e9 });
       case "pickImageFile": return reply({ path: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 212e9 });
       case "planImage": return reply({ canRun: true, problem: null, file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytesToCopy: 214e9,

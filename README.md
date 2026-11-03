@@ -129,6 +129,16 @@ one copy of every file is always kept, and a copy that changed since the search 
 Windows' and programs' own folders are never searched. On the command line: `--in <folder>` (repeatable),
 `--min-mb 10`, and `--remove` to move the extra copies to the Recycle Bin.
 
+**Secure wipe.** **Tools → Secure wipe** overwrites data so it can't be recovered, by this tool's
+own recovery or anyone else's. *Whole drive*: every byte of a drive is overwritten, then read back in
+spots to check it took, and it's left as one empty drive (or completely blank). The drive Windows is
+running from can't be wiped (use the rescue USB for that). *Files and folders*: each file is
+overwritten, renamed to something random and deleted. *Free space*: overwrites only the empty space,
+so files deleted in the past can't be recovered while the files still there stay. One pass is enough
+for modern drives; three is an option. SSDs keep spare space Windows can't reach, so for an SSD
+that's leaving your hands also run its maker's Secure Erase. Command line:
+`pcmigrate-cli wipe --disk 2`, `wipe --file "C:\Users\Sam\Old taxes"`, `wipe --free-space E:`.
+
 `pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
@@ -309,4 +319,5 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 13. Technician mode and client reports ← done
 14. Deleted file recovery (NTFS) ← done
 15. Duplicate file finder ← done
-16. Licensing, installer and a place to sell it
+16. Secure wipe (drives, files, free space) ← done
+17. Licensing, installer and a place to sell it
