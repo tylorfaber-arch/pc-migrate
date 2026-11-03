@@ -111,6 +111,7 @@ async Task<int> Run(string[] argv)
             "rescue-usb" => await RescueUsb(),
             "backup" => await Backup(),
             "tech" => Technician(),
+            "undelete" => Undelete(),
             "schedule" => await ScheduleBackup(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
@@ -432,6 +433,38 @@ async Task<int> Run(string[] argv)
         return Done($"Capture saved to {sink.Root}. Plug the drive into the new PC and run: pcmigrate-cli apply --from \"{sink.Root}\"", manifest.Warnings.Count);
     }
 
+    int Undelete()
+    {
+        var drive = cli.Require("drive").TrimEnd('\\', ':', '/');
+        var find = cli.Get("find") ?? "";
+        var to = cli.Get("to");
+        var goodOnly = cli.Flag("good-only");
+        cli.RejectUnknown();
+        if (drive.Length == 0) return Fail("Say which drive: --drive E:");
+        var letter = drive[..1].ToUpperInvariant();
+        if (to is not null && string.Equals(Path.GetPathRoot(Path.GetFullPath(to))?[..1], letter, StringComparison.OrdinalIgnoreCase))
+            return Fail($"Put the recovered files on a different drive than {letter}:, or they could overwrite what's being recovered.");
+
+        using var volume = new VolumeReader(letter);
+        var undelete = new PcMigrate.Core.Recovery.NtfsUndelete(volume);
+        log.Info($"Reading {letter}:'s file table ({undelete.RecordCount:N0} entries)...");
+        var found = undelete.Scan(null, cts.Token)
+            .Where(f => (find.Length == 0 || f.Path.Contains(find, StringComparison.OrdinalIgnoreCase)) && (!goodOnly || f.Chance == PcMigrate.Core.Recovery.RecoveryChance.Good))
+            .ToList();
+        foreach (var f in found.OrderByDescending(f => f.Modified).Take(to is null ? 300 : 30))
+            Console.WriteLine($"  {f.Chance,-5} {CaptureEngine.FormatBytes(f.Size),9}  {f.Modified:yyyy-MM-dd}  {f.Path}{(f.Why is null ? "" : "  (" + f.Why + ")")}");
+        Console.WriteLine($"{found.Count:N0} deleted file(s) found{(find.Length > 0 ? $" matching '{find}'" : "")}; {found.Count(f => f.Chance == PcMigrate.Core.Recovery.RecoveryChance.Good):N0} likely to come back whole.");
+        if (to is null)
+        {
+            Console.WriteLine($"Recover them with: pcmigrate-cli undelete --drive {letter}:{(find.Length > 0 ? $" --find \"{find}\"" : "")} --to <folder on another drive>");
+            return 0;
+        }
+        var target = Path.Combine(to, $"Recovered from {letter} {DateTime.Now:yyyy-MM-dd HHmm}");
+        var outcome = PcMigrate.Core.Recovery.UndeleteCopier.RecoverTo(undelete, found, target, log, cts.Token);
+        foreach (var p in outcome.Problems.Take(50)) log.Warn(p);
+        return Done($"Recovered {outcome.Recovered:N0} file(s) ({CaptureEngine.FormatBytes(outcome.Bytes)}) to {target}. {outcome.Failed:N0} couldn't be recovered.", outcome.Problems.Count);
+    }
+
     int Technician()
     {
         var off = cli.Flag("off");
@@ -726,6 +759,9 @@ async Task<int> Run(string[] argv)
               pcmigrate-cli tech --company "Name" [--name "Tech"] [--contact "phone/email"] [--show-keys] | --off
                                            Technician mode: capture and apply save a printable client report.
                                            Add --client "Client" [--job 1234] [--notes "..."] to capture or apply.
+              pcmigrate-cli undelete --drive E: [--find "photos"] [--good-only] [--to F:\Recovered]
+                                           Find deleted files on an NTFS drive; with --to, copy them back out
+                                           (to a different drive). Nothing is written to the drive searched.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):

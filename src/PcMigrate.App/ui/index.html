@@ -164,6 +164,15 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .problem { display: flex; gap: 14px; align-items: center; background: var(--warn-soft); color: var(--text); border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
 .problem .grow { flex: 1; }
 .progress-hero.no-files .stat:first-child { display: none; }
+.progress-hero.no-stats .stats { display: none; }
+.del-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.del-tools input[type=text] { flex: 1; min-width: 180px; }
+.del-list { max-height: 420px; overflow-y: auto; }
+.del-list .row { padding: 8px 4px; gap: 10px; }
+.del-list .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.del-list .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.del-list .grow { min-width: 0; }
+.pill.Poor { background: var(--warn-soft); color: var(--warn); }
 .drive-row .lock { display: flex; gap: 10px; margin-top: 10px; }
 .drive-row .lock input { flex: 1; font-family: ui-monospace, Consolas, monospace; letter-spacing: .02em; }
 .choice .tag {
@@ -404,6 +413,7 @@ footer .grow { flex: 1; }
       <button class="btn ghost" data-go="health"><svg><use href="#i-pulse"/></svg>Drive health</button>
       <button class="btn ghost" data-go="rescue"><svg><use href="#i-drive"/></svg>Rescue USB</button>
       <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
+      <button class="btn ghost" data-go="undelete"><svg><use href="#i-hdd"/></svg>Get deleted files back</button>
       <button class="btn ghost" data-go="tech"><svg><use href="#i-key"/></svg>Technician mode</button>
     </div>
   </section>
@@ -542,6 +552,32 @@ footer .grow { flex: 1; }
     </div>
     <p class="hint">A stick of 8 GB or more also gets room to save backups on. To start a PC from it, tap the boot menu key while it turns on (F12 on most PCs, F9 on HP, F8 on ASUS) and pick the stick.</p>
     <div class="actions"><span class="spacer"></span><button class="btn" id="makeRescue" disabled>Make the rescue USB</button></div>
+  </section>
+
+  <!-- DELETED FILE RECOVERY -->
+  <section class="screen" id="s-undelete">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Get deleted files back</h1><p>Finds files deleted from a drive (even after the Recycle Bin was emptied) and copies them somewhere safe. The sooner after deleting, the better the odds.</p></div>
+    <div class="card" id="undelDriveCard">
+      <div class="card-head"><h2>Drive to search</h2><span class="spacer"></span><button class="btn ghost" id="refreshVolumes">Look again</button></div>
+      <div class="rows" id="volumeRows"></div>
+      <div id="volumesLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for drives…</div>
+    </div>
+    <div class="card" id="undelResults" style="display:none">
+      <div class="card-head"><h2 id="undelHead">Deleted files</h2><span class="spacer"></span><button class="btn ghost" id="undelAgain">Search again</button></div>
+      <div class="del-tools">
+        <input type="text" id="undelQuery" placeholder="Search by name or folder, e.g. .docx or Pictures" autocomplete="off" spellcheck="false">
+        <label class="toggle-row" style="padding:0;gap:8px"><input type="checkbox" class="check" id="undelGood" checked><span>Only ones likely to come back whole</span></label>
+      </div>
+      <label class="toggle-row" style="padding:4px 4px 8px;gap:10px"><input type="checkbox" class="check" id="undelAll"><span class="muted" id="undelCount"></span></label>
+      <div class="rows del-list" id="undelRows"></div>
+    </div>
+    <div class="card" id="undelOutCard" style="display:none">
+      <h2>Put recovered files in</h2>
+      <div class="pick-row"><div class="grow"><div class="name" id="undelOut">None chosen</div><div class="faint" id="undelOutSub">Pick a folder on a different drive, so nothing is written over the files being recovered.</div></div>
+        <button class="btn ghost" id="pickUndelOut">Choose…</button></div>
+    </div>
+    <div class="actions"><span class="muted" id="undelNote"></span><span class="spacer"></span><button class="btn" id="undelScan" disabled>Search for deleted files</button><button class="btn" id="undelGo" style="display:none" disabled>Recover</button></div>
   </section>
 
   <!-- LICENSE KEYS -->
@@ -850,6 +886,7 @@ function show(name) {
   if (name === "rescue") findSticks();
   if (name === "schedule") loadSchedule();
   if (name === "tech") loadTech();
+  if (name === "undelete") loadVolumes();
   if (name === "old-what" || name === "new-review") document.querySelectorAll(".job-card").forEach(c => c.style.display = tech.enabled ? "" : "none");
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
@@ -1257,6 +1294,103 @@ $("makeRescue").addEventListener("click", async () => {
   $("progSub").textContent = "You can keep using the PC while this runs.";
 });
 
+// ----- deleted file recovery -----
+let volumes = [], volume = null, undel = null, undelOut = null, undelPicked = new Set(), undelTimer = null;
+async function loadVolumes() {
+  undelMode(!!undel);
+  if (undel) return;
+  volume = null; $("volumeRows").innerHTML = ""; $("volumesLooking").style.display = "flex";
+  try { volumes = await call("listVolumes"); } catch (e) { volumes = []; toast(e.message); }
+  $("volumesLooking").style.display = "none";
+  renderVolumes();
+}
+function renderVolumes() {
+  $("volumeRows").innerHTML = volumes.length ? volumes.map(v => `<div class="row pc-row disk-row ${volume === v.letter ? "sel" : ""}" data-l="${esc(v.letter)}">
+      <div class="avatar" style="border-radius:10px"><svg width="20" height="20"><use href="#i-hdd"/></svg></div>
+      <div class="grow"><div class="name">${esc(v.letter)}: ${esc(v.label || "Local disk")} <span class="faint" style="font-weight:400">(${fmtBytes(v.size)})</span></div>
+        <div class="sub">${fmtBytes(v.free)} free${v.isSystem ? " · Windows keeps writing here, so search it soon" : ""}</div></div>
+      ${v.isSystem ? '<span class="pill">This PC\'s Windows</span>' : ""}${volume === v.letter ? '<span class="pill ok">Selected</span>' : ""}
+    </div>`).join("")
+    : `<p class="muted" style="padding:6px 0">No NTFS drives found. Plug the drive in, wait a few seconds, then press <b>Look again</b>.</p>`;
+  $("volumeRows").querySelectorAll(".disk-row").forEach(el => el.addEventListener("click", () => { volume = el.dataset.l; renderVolumes(); }));
+  $("undelScan").disabled = !volume;
+}
+function undelMode(results) {
+  $("undelDriveCard").style.display = results ? "none" : "";
+  $("undelResults").style.display = results ? "" : "none";
+  $("undelOutCard").style.display = results ? "" : "none";
+  $("undelScan").style.display = results ? "none" : "";
+  $("undelGo").style.display = results ? "" : "none";
+  $("undelNote").textContent = results ? "" : "Nothing is written to the drive being searched.";
+}
+$("refreshVolumes").addEventListener("click", () => { undel = null; loadVolumes(); });
+$("undelAgain").addEventListener("click", () => { undel = null; undelPicked.clear(); undelMode(false); loadVolumes(); });
+$("undelScan").addEventListener("click", async () => {
+  startProgress(`Searching ${volume}: for deleted files`, 1000, { files: false, stats: false });
+  $("progSub").textContent = "This reads the drive's file list. It takes a minute or two.";
+  try {
+    const r = await call("scanDeleted", { letter: volume });
+    undel = { letter: volume, ...r }; undelPicked.clear();
+    $("undelHead").textContent = `${fmtNum(r.count)} deleted files found on ${volume}:`;
+    $("undelGood").checked = r.good > 0;
+    undelMode(true); show("undelete"); await listDeleted();
+  } catch (e) { showError(e); }
+  $("progSub").textContent = "You can keep using the PC while this runs.";
+});
+async function listDeleted() {
+  let r;
+  try { r = await call("deletedList", { query: $("undelQuery").value, goodOnly: $("undelGood").checked }); } catch (e) { toast(e.message); return; }
+  undel.view = r;
+  const CH = { Good: "Likely whole", Poor: "Partly overwritten", No: "Overwritten" };
+  $("undelRows").innerHTML = r.files.length ? r.files.map(f => `<label class="row" title="${esc(f.why || "")}">
+      <input type="checkbox" class="check" data-id="${f.id}" ${undelPicked.has(f.id) ? "checked" : ""}>
+      <div class="grow"><div class="name">${esc(f.name)}</div><div class="sub">${esc(f.folder)} · ${fmtBytes(f.size)} · ${new Date(f.modified).toLocaleDateString()}</div></div>
+      <span class="pill ${f.chance}">${CH[f.chance] || f.chance}</span>
+    </label>`).join("")
+    : `<p class="muted" style="padding:6px 4px">${undel.count ? "No deleted files match." : "No deleted files were found on this drive."}</p>`;
+  $("undelRows").querySelectorAll("input[data-id]").forEach(el => el.addEventListener("change", () => { if ($("undelAll").dataset.on === "1") { $("undelAll").dataset.on = ""; $("undelRows").querySelectorAll("input[data-id]").forEach(x => x.checked && x !== el && undelPicked.add(+x.dataset.id)); } el.checked ? undelPicked.add(+el.dataset.id) : undelPicked.delete(+el.dataset.id); updateUndel(); }));
+  updateUndel();
+}
+function updateUndel() {
+  const v = undel.view;
+  const shown = v.files.length < v.total ? ` (newest ${fmtNum(v.files.length)} shown; search to narrow it down)` : "";
+  $("undelCount").textContent = undelPicked.size ? `${fmtNum(undelPicked.size)} picked` : `Pick all ${fmtNum(v.total)} matching (${fmtBytes(v.bytes)})${shown}`;
+  $("undelGo").disabled = !undelOut || !(undelPicked.size || $("undelAll").dataset.on === "1");
+  $("undelAll").checked = $("undelAll").dataset.on === "1";
+  $("undelGo").textContent = undelPicked.size ? `Recover ${fmtNum(undelPicked.size)}` : $("undelAll").dataset.on === "1" ? `Recover all ${fmtNum(v.total)}` : "Recover";
+}
+$("undelAll").addEventListener("change", e => {
+  $("undelAll").dataset.on = e.target.checked ? "1" : "";
+  if (e.target.checked) undelPicked.clear();
+  $("undelRows").querySelectorAll("input[data-id]").forEach(el => el.checked = e.target.checked);
+  updateUndel();
+});
+$("undelQuery").addEventListener("input", () => { clearTimeout(undelTimer); undelTimer = setTimeout(() => { $("undelAll").dataset.on = ""; listDeleted(); }, 250); });
+$("undelGood").addEventListener("change", () => { $("undelAll").dataset.on = ""; listDeleted(); });
+$("pickUndelOut").addEventListener("click", async () => {
+  try {
+    const r = await call("pickImageFolder"); if (!r) return;
+    if (r.path[0].toUpperCase() === undel.letter.toUpperCase()) { toast(`Pick a folder on a different drive than ${undel.letter}:.`); return; }
+    undelOut = r.path; $("undelOut").textContent = r.path; $("undelOutSub").textContent = r.freeBytes != null ? `${fmtBytes(r.freeBytes)} free` : "";
+    updateUndel();
+  } catch (e) { toast(e.message); }
+});
+$("undelGo").addEventListener("click", async () => {
+  const all = $("undelAll").dataset.on === "1";
+  const args = all ? { folder: undelOut, query: $("undelQuery").value, goodOnly: $("undelGood").checked } : { folder: undelOut, ids: [...undelPicked] };
+  const total = all ? undel.view.bytes : undel.view.files.filter(f => undelPicked.has(f.id)).reduce((a, f) => a + f.size, 0);
+  startProgress("Recovering deleted files", total, { files: false });
+  try {
+    const r = await call("recoverDeleted", args);
+    showDone({
+      title: r.failed ? "Some files came back" : "Files recovered",
+      sub: `They're in ${r.folder}, in their old folders. Open a few to check them: a file can come back with parts of other files in it if its space was reused.`,
+      stats: [["Recovered", fmtNum(r.recovered)], ["Size", fmtBytes(r.bytes)], ["Couldn't", fmtNum(r.failed)]],
+      warnings: r.problems || [], reportPath: r.folder,
+    });
+  } catch (e) { showError(e); }
+});
+
 function leaveDrive() {
   state.pulled = null; state.info = state.here; state.sizes = {}; appPlans = null;
   $("pcLabel").textContent = "This PC"; $("pcName").textContent = state.here.computerName;
@@ -1534,9 +1668,10 @@ $("startApply").addEventListener("click", async () => {
 
 // ----- progress -----
 let prog = { start: 0, total: 0 };
-function startProgress(title, totalBytes, { files = true } = {}) {
+function startProgress(title, totalBytes, { files = true, stats = true } = {}) {
   prog = { start: performance.now(), total: totalBytes || 0, warn: 0 };
   document.querySelector(".progress-hero").classList.toggle("no-files", !files);
+  document.querySelector(".progress-hero").classList.toggle("no-stats", !stats);
   state.warnings = [];
   $("progTitle").textContent = title;
   $("ring").classList.toggle("indeterminate", !prog.total);
@@ -1684,6 +1819,19 @@ const Mock = {
         { number: 4, model: "Generic Card Reader", size: 512e6, bus: "USB", isSystem: false, used: 0, letters: [], hasWindows: false, problem: "The stick is too small; it needs at least 1 GB." }], 600);
       case "makeRescueUsb": emit("log", { message: "Setting it up to open pc-migrate..." }, 400);
         return reply({ boot: "R:\\", data: "S:\\", notes: ["To use it: plug it into the PC, turn it on while tapping the boot menu key (F12 on most PCs, F9 on HP) and pick the USB stick."], logPath: "C:\\ProgramData\\pc-migrate\\rescue-usb.log" }, 3000);
+      case "listVolumes": return reply([
+        { letter: "C", label: "Windows", size: 500e9, free: 288e9, isSystem: true },
+        { letter: "E", label: "Sam's USB", size: 64e9, free: 51e9, isSystem: false }], 500);
+      case "scanDeleted": { let k = 0; const t = setInterval(() => { k += 50; receive({ event: "progress", files: 0, bytes: k, path: "" }); if (k >= 1000) clearInterval(t); }, 100);
+        return reply({ count: 1843, good: 1202, poor: 400 }, 2200); }
+      case "deletedList": {
+        const all = [["Wedding speech.docx", "\\Users\\Sam\\Documents", 48e3, "Good"], ["IMG_2041.JPG", "\\Users\\Sam\\Pictures\\2026\\June", 4.1e6, "Good"], ["IMG_2042.JPG", "\\Users\\Sam\\Pictures\\2026\\June", 3.8e6, "Good"],
+          ["Budget 2026.xlsx", "\\Users\\Sam\\Desktop", 92e3, "Good"], ["taxes-2025.pdf", "\\Users\\Sam\\Downloads", 1.2e6, "Poor"], ["clip.mp4", "\\Users\\Sam\\Videos", 812e6, "Poor"], ["old notes.txt", "\\Users\\Sam\\Documents", 2e3, "No"]]
+          .map(([name, folder, size, chance], i) => ({ id: 100 + i, name, folder, size, modified: new Date(Date.now() - i * 864e5 * 3).toISOString(), chance, why: chance === "Poor" ? "Some of its space has been used by newer files." : chance === "No" ? "All of its space has been reused." : null }))
+          .filter(f => (!args.goodOnly || f.chance === "Good") && (!args.query || (f.folder + "\\" + f.name).toLowerCase().includes(args.query.toLowerCase())));
+        return reply({ total: all.length, bytes: all.reduce((a, f) => a + f.size, 0), files: all }, 200);
+      }
+      case "recoverDeleted": return reply({ recovered: args.ids ? args.ids.length : 5, failed: 0, bytes: 9.1e6, problems: [], folder: "F:\\Recovered\\Recovered from E 2026-11-03 1412" }, 2000);
       case "pickImageFolder": return reply({ path: "E:\\Images", freeBytes: 640e9 });
       case "pickImageFile": return reply({ path: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 212e9 });
       case "planImage": return reply({ canRun: true, problem: null, file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytesToCopy: 214e9,

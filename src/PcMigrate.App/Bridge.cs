@@ -71,6 +71,10 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "planClone" => await Task.Run(() => PlanClone(Int(args, "from", -1), Int(args, "to", -1)).View),
         "shrinkSource" => await Task.Run(() => ShrinkSource(Int(args, "from", -1), Int(args, "to", -1))),
         "clone" => await Clone(Int(args, "from", -1), Int(args, "to", -1)),
+        "listVolumes" => await Task.Run(ListVolumes),
+        "scanDeleted" => await ScanDeleted(Str(args, "letter")),
+        "deletedList" => DeletedList(Str(args, "query"), args.TryGetProperty("goodOnly", out var go) && go.ValueKind == JsonValueKind.True),
+        "recoverDeleted" => await RecoverDeleted(args),
         "techSettings" => TechView(TechnicianStore.Load()),
         "techSave" => TechSave(args),
         "scheduleStatus" => await Task.Run(ScheduleStatus),
@@ -177,6 +181,100 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         {
             _notify.Failed("Clone stopped", Friendly(ex), logPath);
             throw;
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    // ----- deleted file recovery -----
+
+    private VolumeReader? _undeleteVolume;
+    private PcMigrate.Core.Recovery.NtfsUndelete? _undelete;
+    private List<PcMigrate.Core.Recovery.DeletedFile> _deleted = [];
+    private string? _undeleteLetter;
+
+    private static List<object> ListVolumes() =>
+        DriveInfo.GetDrives()
+            .Where(d => d.DriveType is DriveType.Fixed or DriveType.Removable && d.IsReady && d.DriveFormat == "NTFS")
+            .Select(d => (object)new
+            {
+                letter = d.Name[..1], label = d.VolumeLabel, size = d.TotalSize, free = d.TotalFreeSpace,
+                isSystem = string.Equals(d.Name, Path.GetPathRoot(Environment.SystemDirectory), StringComparison.OrdinalIgnoreCase),
+            })
+            .ToList();
+
+    private async Task<object> ScanDeleted(string letter)
+    {
+        if (letter.Length == 0) throw new InvalidOperationException("Pick a drive to search.");
+        var ct = BeginWork();
+        using var log = new GuiLog(Post);
+        try
+        {
+            _undeleteVolume?.Dispose();
+            _undeleteVolume = null; _undelete = null; _deleted = [];
+            var volume = new VolumeReader(letter);
+            var undelete = new PcMigrate.Core.Recovery.NtfsUndelete(volume);
+            log.Info($"Reading {letter}:'s file table ({undelete.RecordCount:N0} entries)...");
+            var found = await Task.Run(() => undelete.Scan(new Progress<double>(f => log.FileProgress(0, (long)(f * 1000), "")), ct), ct);
+            (_undeleteVolume, _undelete, _deleted, _undeleteLetter) = (volume, undelete, found, letter);
+            return new
+            {
+                count = found.Count,
+                good = found.Count(f => f.Chance == PcMigrate.Core.Recovery.RecoveryChance.Good),
+                poor = found.Count(f => f.Chance == PcMigrate.Core.Recovery.RecoveryChance.Poor),
+            };
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    private IEnumerable<PcMigrate.Core.Recovery.DeletedFile> MatchDeleted(string query, bool goodOnly) =>
+        _deleted.Where(f => (!goodOnly || f.Chance == PcMigrate.Core.Recovery.RecoveryChance.Good)
+                         && (query.Length == 0 || f.Path.Contains(query, StringComparison.OrdinalIgnoreCase)));
+
+    private object DeletedList(string query, bool goodOnly)
+    {
+        var matches = MatchDeleted(query.Trim(), goodOnly).ToList();
+        return new
+        {
+            total = matches.Count,
+            bytes = matches.Sum(f => f.Size),
+            files = matches.OrderByDescending(f => f.Modified).Take(500).Select(f => new
+            {
+                id = f.Record, name = f.Name, folder = f.Folder, size = f.Size, modified = f.Modified.ToString("o"),
+                chance = f.Chance.ToString(), why = f.Why,
+            }),
+        };
+    }
+
+    private async Task<object> RecoverDeleted(JsonElement args)
+    {
+        if (_undelete is null) throw new InvalidOperationException("Search a drive first.");
+        var folder = Str(args, "folder");
+        if (folder.Length == 0) throw new InvalidOperationException("Pick where to put the recovered files.");
+        if (string.Equals(Path.GetPathRoot(Path.GetFullPath(folder))?[..1], _undeleteLetter, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Put the recovered files on a different drive than {_undeleteLetter}:. Writing to {_undeleteLetter}: could overwrite the very files being recovered.");
+        IEnumerable<PcMigrate.Core.Recovery.DeletedFile> chosen;
+        if (args.TryGetProperty("ids", out var ids) && ids.ValueKind == JsonValueKind.Array)
+        {
+            var wanted = ids.EnumerateArray().Select(i => i.GetInt64()).ToHashSet();
+            chosen = _deleted.Where(f => wanted.Contains(f.Record)).ToList();
+        }
+        else chosen = MatchDeleted(Str(args, "query").Trim(), args.TryGetProperty("goodOnly", out var g) && g.ValueKind == JsonValueKind.True).ToList();
+        var list = chosen.ToList();
+        var total = list.Sum(f => f.Size);
+        var ct = BeginWork();
+        using var log = new GuiLog(Post) { OnProgress = (_, bytes) => _notify.Progress(bytes, total) };
+        try
+        {
+            var target = Path.Combine(folder, $"Recovered from {_undeleteLetter} {DateTime.Now:yyyy-MM-dd HHmm}");
+            var outcome = await Task.Run(() => PcMigrate.Core.Recovery.UndeleteCopier.RecoverTo(_undelete, list, target, log, ct), ct);
+            _notify.Finished("Files recovered", $"{outcome.Recovered:N0} file(s) recovered to {target}.", target);
+            return new { recovered = outcome.Recovered, failed = outcome.Failed, bytes = outcome.Bytes, problems = outcome.Problems.Take(200), folder = target };
         }
         finally
         {
