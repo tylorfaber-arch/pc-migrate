@@ -17,12 +17,13 @@ internal static class Menu
         Console.WriteLine("  5. OLD PC: send over the network");
         Console.WriteLine("  6. Rescue a drive pulled from a dead PC (plugged in by USB)");
         Console.WriteLine("  7. Clone a whole drive onto another (erases the target)");
-        Console.WriteLine("  8. Show all commands");
+        Console.WriteLine("  8. Show license keys (Windows, Office, programs)");
+        Console.WriteLine("  9. Show all commands");
         Console.WriteLine();
 
         while (true)
         {
-            switch (Prompt("Choose 1-8 (or press Enter to quit)"))
+            switch (Prompt("Choose 1-9 (or press Enter to quit)"))
             {
                 case "":
                     return null;
@@ -74,11 +75,16 @@ internal static class Menu
                     return ["clone", "--from", from, "--to", to, "--shrink-source"];
                 }
                 case "8":
+                {
+                    var drive = Prompt("Drive letter of a dead PC's drive, or press Enter for this PC");
+                    return drive.Length == 0 ? ["keys"] : ["keys", "--from-drive", drive];
+                }
+                case "9":
                     return ["help"];
                 case "u" or "U":
                     return ["update"];
                 default:
-                    Console.WriteLine("Please type a number from 1 to 8.");
+                    Console.WriteLine("Please type a number from 1 to 9.");
                     break;
             }
         }

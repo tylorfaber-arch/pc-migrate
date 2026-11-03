@@ -16,6 +16,9 @@ public sealed class OfflineSystemProbe(OfflineWindows drive, IMigrationLog log) 
     private const string UninstallKey = @"Microsoft\Windows\CurrentVersion\Uninstall";
 
     public string? CurrentUserSid => null;
+
+    // The firmware key belongs to the dead PC's motherboard, so only the registry can be read here.
+    public IReadOnlyList<Keys.LicenseKey> LicenseKeys() => KeyFinder.Find(drive.Software, @"(drive)\Windows\System32\config\SOFTWARE");
     public OfflinePaths Offline => drive.Paths;
     OfflinePaths? ISystemProbe.Offline => drive.Paths;
 

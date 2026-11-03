@@ -18,6 +18,8 @@ public sealed class Manifest
     /// <summary>Every program looked at, including the ones that have to be installed by hand.</summary>
     public List<Apps.AppEntry> Apps { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
+    /// <summary>License keys read from the old PC, also saved as license-keys.txt at the top of the store.</summary>
+    public List<Keys.LicenseKey> LicenseKeys { get; init; } = [];
     public bool UsedShadowCopy { get; set; }
 }
 
