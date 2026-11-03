@@ -32,7 +32,8 @@ internal static class Menu
                 case "2":
                 {
                     var to = PromptRequired("Folder to save to, for example E:\\migration");
-                    return [.. new[] { "capture", "--to", to }, .. Users(), .. Log(to)];
+                    var encrypt = Prompt("Protect it with a password? (y/N)").StartsWith('y');
+                    return [.. new[] { "capture", "--to", to }, .. (encrypt ? new[] { "--encrypt" } : []), .. Users(), .. Log(to)];
                 }
                 case "3":
                 {
@@ -106,6 +107,23 @@ internal static class Menu
     // Keep a log next to the data, so problems can be looked at later.
     private static string[] Log(string folder) =>
         ["--log", Path.Combine(folder, $"pcmigrate-{DateTime.Now:yyyyMMdd-HHmmss}.log")];
+
+    /// <summary>Reads a password without showing it.</summary>
+    internal static string ReadSecret(string question)
+    {
+        Console.Write(question + ": ");
+        if (Console.IsInputRedirected) return Console.ReadLine() ?? "";
+        var text = new System.Text.StringBuilder();
+        while (true)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter) break;
+            if (key.Key == ConsoleKey.Backspace) { if (text.Length > 0) text.Length--; continue; }
+            if (!char.IsControl(key.KeyChar)) text.Append(key.KeyChar);
+        }
+        Console.WriteLine();
+        return text.ToString();
+    }
 
     private static string Prompt(string question)
     {

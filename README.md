@@ -177,9 +177,16 @@ Licence keys and sign-ins don't move.
 
 ## Security notes
 
-- The store and the network transfer are **not encrypted** yet. The store contains Wi-Fi passwords
-  and browser data, so keep the drive safe and wipe it afterwards, and only use network mode on a
-  network you trust.
+- **Password-protected backups.** Tick *Protect it with a password* when saving to a drive (or use
+  `capture --encrypt`). Every file, the manifest and the license key list are encrypted with
+  AES-256-GCM: each file gets its own key derived from the backup key, the backup key comes from the
+  password through PBKDF2-SHA256 (600,000 rounds), and each 1 MB chunk is sealed so a changed,
+  swapped or cut-short file is refused. The password isn't stored anywhere and can't be recovered.
+  File and folder names stay readable. On the new PC the backup is unlocked into
+  `C:\ProgramData\pc-migrate`, moved into place, and the unlocked copy deleted; the drive is left as it was.
+- Without a password the store is **not encrypted**. It contains Wi-Fi passwords, license keys and
+  browser data, so keep the drive safe and wipe it afterwards. The network transfer isn't encrypted
+  either, so only use network mode on a network you trust.
 - The exes are not code-signed yet, so Windows SmartScreen will warn the first time it runs
   ("More info" > "Run anyway").
 
@@ -223,6 +230,7 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 5. Full disk clone, drive to drive (including external to external) ← done, needs testing on real drives
 6. License key finder ← done
 7. Drive health check ← done
-8. Encrypted backups, disk images, rescue USB, scheduled backups, technician mode
-9. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
-10. Licensing, installer and a place to sell it
+8. Password-protected backups ← done
+9. Disk images, rescue USB, scheduled backups, technician mode
+10. Keep or rebuild program installers, and install prerequisites (VC++, .NET, Java) automatically
+11. Licensing, installer and a place to sell it
