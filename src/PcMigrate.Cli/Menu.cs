@@ -35,7 +35,7 @@ internal static class Menu
                 {
                     var to = PromptRequired("Folder to save to, for example E:\\migration");
                     var encrypt = Prompt("Protect it with a password? (y/N)").StartsWith('y');
-                    return [.. new[] { "capture", "--to", to }, .. (encrypt ? new[] { "--encrypt" } : []), .. Users(), .. Log(to)];
+                    return [.. new[] { "capture", "--to", to }, .. (encrypt ? new[] { "--encrypt" } : []), .. Users(), .. Client(), .. Log(to)];
                 }
                 case "3":
                 {
@@ -43,7 +43,7 @@ internal static class Menu
                     var result = new List<string> { "apply", "--from", from };
                     var map = Prompt("If your user name is different on this PC, type old=new (or press Enter)");
                     if (map.Contains('=')) result.AddRange(["--map", map]);
-                    return [.. result, .. Log(from)];
+                    return [.. result, .. Client(), .. Log(from)];
                 }
                 case "4":
                     return ["receive"];
@@ -66,7 +66,7 @@ internal static class Menu
                     var result = new List<string> { "capture", "--from-drive", drive, "--to", to };
                     if (drives.Any(d => d.Locked && d.Root.StartsWith(drive.Trim()[..1], StringComparison.OrdinalIgnoreCase)))
                         result.AddRange(["--recovery-key", PromptRequired("BitLocker recovery key (48 digits, from aka.ms/myrecoverykey)")]);
-                    return [.. result, .. Users(), .. Log(to)];
+                    return [.. result, .. Users(), .. Client(), .. Log(to)];
                 }
                 case "7":
                 {
@@ -121,6 +121,16 @@ internal static class Menu
         Console.WriteLine();
         Console.Write("Press Enter to close this window.");
         Console.ReadLine();
+    }
+
+    /// <summary>Technician mode: who the job is for, for the client report.</summary>
+    private static string[] Client()
+    {
+        if (!PcMigrate.Core.Report.TechnicianStore.Load().Enabled) return [];
+        var client = Prompt("Client name for the report (or press Enter to skip)");
+        if (client.Length == 0) return [];
+        var job = Prompt("Job number (or press Enter)");
+        return job.Length == 0 ? ["--client", client] : ["--client", client, "--job", job];
     }
 
     private static string[] Users()
