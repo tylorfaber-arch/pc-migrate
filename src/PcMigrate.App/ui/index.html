@@ -179,6 +179,15 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .dup-copy .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-size: 13px; }
 .folder-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .folder-row .p { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layout-bar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); margin: 6px 0 12px; background: var(--surface-2); }
+.layout-bar div { min-width: 6px; border-right: 1px solid var(--surface); position: relative; background: var(--surface-2); }
+.layout-bar div.data { background: var(--accent-soft); }
+.layout-bar div.data i { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .45; }
+.layout-bar div.sel { outline: 2px solid var(--accent); outline-offset: -2px; }
+.layout-bar div.free { background: repeating-linear-gradient(45deg, transparent 0 6px, var(--border) 6px 7px); }
+.size-row { display: flex; gap: 12px; align-items: center; }
+.size-row input[type=range] { flex: 1; accent-color: var(--accent); }
+.size-row input[type=text] { width: 110px; text-align: right; }
 .pill.Poor { background: var(--warn-soft); color: var(--warn); }
 .drive-row .lock { display: flex; gap: 10px; margin-top: 10px; }
 .drive-row .lock input { flex: 1; font-family: ui-monospace, Consolas, monospace; letter-spacing: .02em; }
@@ -423,6 +432,7 @@ footer .grow { flex: 1; }
       <button class="btn ghost" data-go="schedule"><svg><use href="#i-clone"/></svg>Scheduled backup</button>
       <button class="btn ghost" data-go="undelete"><svg><use href="#i-hdd"/></svg>Get deleted files back</button>
       <button class="btn ghost" data-go="dups"><svg><use href="#i-folder"/></svg>Duplicate files</button>
+      <button class="btn ghost" data-go="resize"><svg><use href="#i-hdd"/></svg>Resize partitions</button>
       <button class="btn ghost" data-go="wipe"><svg><use href="#i-x"/></svg>Secure wipe</button>
       <button class="btn ghost" data-go="tech"><svg><use href="#i-key"/></svg>Technician mode</button>
     </div>
@@ -642,6 +652,31 @@ footer .grow { flex: 1; }
       <input type="text" id="wipeEraseInput" autocomplete="off" spellcheck="false" placeholder="ERASE">
     </div>
     <div class="actions"><span class="spacer"></span><button class="btn danger" id="wipeGo" disabled>Wipe</button></div>
+  </section>
+
+  <!-- RESIZE PARTITIONS -->
+  <section class="screen" id="s-resize">
+    <button class="back" data-go="home"><svg width="16" height="16"><use href="#i-back"/></svg>Back</button>
+    <div class="title"><h1>Resize partitions</h1><p>Make a partition bigger or smaller, keeping its files. Handy after cloning to a bigger drive, when C: hasn't grown into the new space.</p></div>
+    <div class="card">
+      <div class="card-head"><h2>Drive</h2><span class="spacer"></span><button class="btn ghost" id="resizeRefresh">Look again</button></div>
+      <div class="seg" id="resizeDisks" style="margin-bottom:6px"></div>
+      <div id="resizeLooking" class="waiting" style="margin:10px 0 6px"><span class="pulse"></span>Looking for drives…</div>
+      <div class="layout-bar" id="resizeBar"></div>
+      <div class="rows" id="resizeParts"></div>
+    </div>
+    <div class="card" id="resizeSizeCard" style="display:none">
+      <h2 id="resizeSizeHead">New size</h2>
+      <div id="resizeLoading" class="waiting" style="margin:6px 0"><span class="pulse"></span>Asking Windows how far it can go…</div>
+      <div id="resizeBody">
+        <div class="size-row"><input type="range" id="resizeRange" step="1"><input type="text" id="resizeGb"><span class="muted">GB</span></div>
+        <div class="faint" id="resizeLimits" style="margin-top:6px"></div>
+        <div id="resizeBlocked"></div>
+        <label class="toggle-row" id="resizeMoveRow" style="display:none"><input type="checkbox" class="check" id="resizeMove"><div class="grow"><div class="name" style="font-weight:600">Move the recovery partition to the end of the drive</div><div class="sub" id="resizeMoveSub">Microsoft's own steps: the recovery tools are switched off, the partition is moved, and they're switched back on.</div></div></label>
+      </div>
+    </div>
+    <p class="hint">Shrinking can take a while on a full drive, as Windows moves files out of the way first. Have a backup of anything that matters before changing partitions.</p>
+    <div class="actions"><span class="muted" id="resizeNote"></span><span class="spacer"></span><button class="btn" id="resizeGo" disabled>Resize</button></div>
   </section>
 
   <!-- LICENSE KEYS -->
@@ -953,6 +988,7 @@ function show(name) {
   if (name === "undelete") loadVolumes();
   if (name === "dups") loadDupFolders();
   if (name === "wipe") loadWipe();
+  if (name === "resize") loadResize();
   if (name === "old-what" || name === "new-review") document.querySelectorAll(".job-card").forEach(c => c.style.display = tech.enabled ? "" : "none");
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === "s-" + name));
   const step = STEPS[name] || 0;
@@ -1600,6 +1636,95 @@ $("wipeGo").addEventListener("click", async () => {
   $("progSub").textContent = "You can keep using the PC while this runs.";
 });
 
+// ----- resize partitions -----
+let rDisks = [], rDisk = null, rPart = null, rOpt = null;
+const GB = 1024 ** 3;
+async function loadResize() {
+  rPart = null; rOpt = null; $("resizeLooking").style.display = "flex"; $("resizeParts").innerHTML = ""; $("resizeBar").innerHTML = "";
+  try { rDisks = await call("listPartitions"); } catch (e) { rDisks = []; toast(e.message); }
+  $("resizeLooking").style.display = "none";
+  if (!rDisks.some(d => d.number === rDisk)) rDisk = (rDisks.find(d => d.isSystem) || rDisks[0] || {}).number ?? null;
+  renderResize();
+}
+function renderResize() {
+  $("resizeDisks").innerHTML = rDisks.map(d => `<button data-n="${d.number}" class="${d.number === rDisk ? "on" : ""}">${esc(d.model)} (${fmtBytes(d.size)})</button>`).join("");
+  $("resizeDisks").querySelectorAll("button").forEach(b => b.addEventListener("click", () => { rDisk = +b.dataset.n; rPart = null; rOpt = null; renderResize(); }));
+  const d = rDisks.find(x => x.number === rDisk);
+  if (!d) { $("resizeSizeCard").style.display = "none"; return; }
+  // The bar: partitions and the gaps between them, to scale.
+  const pieces = []; let at = 0;
+  for (const p of d.partitions) { if (p.offset - at > d.size * 0.004) pieces.push({ free: true, length: p.offset - at }); pieces.push(p); at = p.offset + p.length; }
+  if (d.size - at > d.size * 0.004) pieces.push({ free: true, length: d.size - at });
+  $("resizeBar").innerHTML = pieces.map(p => `<div class="${p.free ? "free" : p.resizable ? "data" : ""} ${p.number === rPart ? "sel" : ""}" style="flex:${Math.max(p.length / d.size, 0.006)}" title="${esc(p.free ? "Free space " + fmtBytes(p.length) : p.label + " " + fmtBytes(p.length))}">${p.used ? `<i style="width:${Math.min(100, p.used / p.length * 100)}%"></i>` : ""}</div>`).join("");
+  const free = pieces.filter(p => p.free).reduce((a, p) => a + p.length, 0);
+  $("resizeParts").innerHTML = d.partitions.map(p => `<div class="row pc-row disk-row ${p.number === rPart ? "sel" : ""} ${p.resizable ? "" : "off"}" data-n="${p.number}" title="${p.resizable ? "" : "Only NTFS data partitions can be resized here."}">
+      <div class="grow"><div class="name">${esc(p.label)} <span class="faint" style="font-weight:400">(${fmtBytes(p.length)})</span></div><div class="sub">${p.used != null ? fmtBytes(p.used) + " used" : p.resizable ? "" : "System partition"}</div></div>
+      ${p.number === rPart ? '<span class="pill ok">Selected</span>' : ""}</div>`).join("")
+    + (free > GB ? `<p class="muted" style="padding:6px 4px;margin:0">${fmtBytes(free)} of the drive isn't used by any partition.</p>` : "");
+  $("resizeParts").querySelectorAll(".disk-row:not(.off)").forEach(el => el.addEventListener("click", () => pickResizePart(+el.dataset.n)));
+  $("resizeSizeCard").style.display = rPart != null ? "" : "none";
+  updateResize();
+}
+async function pickResizePart(n) {
+  rPart = n; rOpt = null; $("resizeMove").checked = false; renderResize();
+  $("resizeLoading").style.display = "flex"; $("resizeBody").style.display = "none";
+  try { rOpt = await call("resizeOptions", { disk: rDisk, part: n }); } catch (e) { toast(e.message); rPart = null; renderResize(); return; }
+  $("resizeLoading").style.display = "none"; $("resizeBody").style.display = "";
+  const auto = rOpt.blocked && rOpt.canMoveRecovery && !rOpt.moveProblem;
+  $("resizeMove").checked = !!auto;
+  setResizeSize(auto ? rOpt.maxAfterMove : rOpt.size);
+}
+function resizeMax() { return $("resizeMove").checked && rOpt.canMoveRecovery ? rOpt.maxAfterMove : rOpt.max; }
+function setResizeSize(bytes) {
+  const r = $("resizeRange");
+  r.min = Math.ceil(rOpt.min / GB); r.max = Math.floor(resizeMax() / GB);
+  r.value = Math.round(bytes / GB); $("resizeGb").value = Math.round(bytes / GB);
+  updateResize();
+}
+function wantedSize() {
+  const gb = parseFloat($("resizeGb").value);
+  if (!rOpt || !isFinite(gb)) return null;
+  // The slider's ends mean exactly the smallest and biggest.
+  if (gb >= Math.floor(resizeMax() / GB)) return resizeMax();
+  if (gb <= Math.ceil(rOpt.min / GB)) return Math.max(rOpt.min, Math.ceil(rOpt.min / GB) * GB);
+  return Math.round(gb * GB);
+}
+function updateResize() {
+  const go = $("resizeGo");
+  if (!rOpt) { go.disabled = true; $("resizeNote").textContent = ""; return; }
+  const d = rDisks.find(x => x.number === rDisk), p = d.partitions.find(x => x.number === rPart);
+  $("resizeSizeHead").textContent = `New size for ${p.label}`;
+  $("resizeLimits").textContent = `Now ${fmtBytes(rOpt.size)} · smallest ${fmtBytes(rOpt.min)} · biggest ${fmtBytes(resizeMax())}`;
+  $("resizeBlocked").innerHTML = rOpt.blocked ? `<div class="problem" style="margin:12px 0 0">${esc(rOpt.blocked)}${rOpt.canMoveRecovery ? ` Moving it to the end of the drive lets this partition grow to ${fmtBytes(rOpt.maxAfterMove)}.` : ""}</div>` : "";
+  $("resizeMoveRow").style.display = rOpt.canMoveRecovery ? "" : "none";
+  $("resizeMove").disabled = !!rOpt.moveProblem;
+  $("resizeMoveSub").textContent = rOpt.moveProblem || "Microsoft's own steps: the recovery tools are switched off, the partition is moved, and they're switched back on.";
+  const want = wantedSize();
+  const same = want != null && Math.abs(want - rOpt.size) < 1024 ** 2 && !$("resizeMove").checked;
+  const ok = want != null && want >= rOpt.min - 1 && want <= resizeMax() + 1 && !same;
+  go.disabled = !ok;
+  go.textContent = !ok ? "Resize" : want > rOpt.size ? `Grow to ${fmtBytes(want)}` : want < rOpt.size ? `Shrink to ${fmtBytes(want)}` : "Move the recovery partition";
+  $("resizeNote").textContent = ok && want < rOpt.size ? `Frees ${fmtBytes(rOpt.size - want)} after it.` : "";
+}
+$("resizeRange").addEventListener("input", e => { $("resizeGb").value = e.target.value; updateResize(); });
+$("resizeGb").addEventListener("input", e => { $("resizeRange").value = e.target.value; updateResize(); });
+$("resizeMove").addEventListener("change", () => setResizeSize(Math.min(wantedSize() ?? rOpt.size, resizeMax()) === rOpt.max && $("resizeMove").checked ? rOpt.maxAfterMove : Math.min(wantedSize() ?? rOpt.size, resizeMax())));
+$("resizeRefresh").addEventListener("click", loadResize);
+$("resizeGo").addEventListener("click", async () => {
+  const d = rDisks.find(x => x.number === rDisk), p = d.partitions.find(x => x.number === rPart);
+  const want = wantedSize(), move = $("resizeMove").checked && rOpt.canMoveRecovery;
+  if (!confirm(`${want > rOpt.size ? "Grow" : "Shrink"} ${p.label} to ${fmtBytes(want)}${move ? ", moving the recovery partition to the end of the drive" : ""}?`)) return;
+  startProgress(`Resizing ${p.label}`, 0, { stats: false });
+  $("progSub").textContent = want < rOpt.size ? "Windows moves files out of the way first, so this can take a while." : "This usually takes under a minute.";
+  try {
+    const r = await call("resizePartition", { disk: rDisk, part: rPart, size: want, moveRecovery: move });
+    showDone({ title: "Partition resized", sub: `${p.label} is now ${fmtBytes(r.size)}. Its files are untouched.${move ? " The recovery partition is at the end of the drive and switched back on." : ""}`,
+      stats: [["Was", fmtBytes(rOpt.size)], ["Now", fmtBytes(r.size)], ["Change", (r.size >= rOpt.size ? "+" : "−") + fmtBytes(Math.abs(r.size - rOpt.size))]], logPath: r.logPath });
+    rOpt = null; rPart = null;
+  } catch (e) { showError(e); }
+  $("progSub").textContent = "You can keep using the PC while this runs.";
+});
+
 function leaveDrive() {
   state.pulled = null; state.info = state.here; state.sizes = {}; appPlans = null;
   $("pcLabel").textContent = "This PC"; $("pcName").textContent = state.here.computerName;
@@ -2057,6 +2182,22 @@ const Mock = {
         return reply({ letter: args.blank ? null : "G", bytes: 2e12 * args.passes, seconds: 14400, notes: [], logPath: "C:\\ProgramData\\pc-migrate\\wipe.log" }, 5200); }
       case "wipeFiles": return reply({ files: 214, bytes: 1.4e9, problems: [] }, 1500);
       case "wipeFree": return reply({ letter: args.letter }, 1500);
+      case "listPartitions": { const G = 1024 ** 3, M = 1024 ** 2;
+        return reply([
+          { number: 0, model: "Samsung SSD 980 500GB", size: 500e9, bus: "NVMe", isSystem: false, partitions: [
+            { number: 1, offset: M, length: 100 * M, used: null, letter: null, label: "Boot (EFI)", resizable: false },
+            { number: 2, offset: 101 * M, length: 16 * M, used: null, letter: null, label: "Reserved", resizable: false },
+            { number: 3, offset: 117 * M, length: 300 * G, used: 120 * G, letter: "D", label: "D: NTFS", resizable: true },
+            { number: 4, offset: 117 * M + 300 * G, length: 160 * G, used: 40 * G, letter: "E", label: "E: NTFS", resizable: true }] },
+          { number: 1, model: "Crucial MX500 2TB", size: 2000 * G, bus: "SATA", isSystem: true, partitions: [
+            { number: 1, offset: M, length: 100 * M, used: null, letter: null, label: "Boot (EFI)", resizable: false },
+            { number: 2, offset: 101 * M, length: 16 * M, used: null, letter: null, label: "Reserved", resizable: false },
+            { number: 3, offset: 117 * M, length: 475 * G, used: 212 * G, letter: "C", label: "C: NTFS", resizable: true },
+            { number: 4, offset: 117 * M + 475 * G, length: 750 * M, used: 520 * M, letter: null, label: "Recovery", resizable: false }] }], 500); }
+      case "resizeOptions": { const G = 1024 ** 3;
+        return reply(args.disk === 1 ? { size: 475 * G, min: 214 * G, max: 475 * G, blocked: "The recovery partition sits right after it, so it can't grow into the free space.", canMoveRecovery: true, maxAfterMove: 1999 * G, moveProblem: null }
+          : { size: args.part === 3 ? 300 * G : 160 * G, min: args.part === 3 ? 122 * G : 41 * G, max: args.part === 3 ? 300 * G : 165 * G, blocked: args.part === 3 ? "Another partition (E: NTFS) sits right after it." : null, canMoveRecovery: false, maxAfterMove: 0, moveProblem: null }, 700); }
+      case "resizePartition": return reply({ size: args.size, logPath: "C:\\ProgramData\\pc-migrate\\resize.log" }, 1800);
       case "pickImageFolder": return reply({ path: "E:\\Images", freeBytes: 640e9 });
       case "pickImageFile": return reply({ path: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", size: 212e9 });
       case "planImage": return reply({ canRun: true, problem: null, file: "E:\\Images\\TYLOR-DESKTOP disk 0 2026-11-03.vhdx", bytesToCopy: 214e9,
