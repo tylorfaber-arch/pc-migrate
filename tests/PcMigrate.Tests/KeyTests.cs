@@ -73,4 +73,14 @@ public class KeyTests
         Assert.Contains("AAAAA-BBBBB-CCCCC-DDDDD-EEEEE", text);
         Assert.Contains("note here", text);
     }
+
+    [Fact]
+    public void Reading_this_pcs_keys_runs_end_to_end()
+    {
+        // Only Windows has a registry; CI runs this on Windows. It once failed on every PC
+        // because the Office lookup closed the registry key the rest of the search still used.
+        if (!OperatingSystem.IsWindows()) return;
+        var keys = PcMigrate.Core.Windows.KeyFinder.ForThisPc();
+        Assert.NotNull(keys);
+    }
 }

@@ -331,8 +331,9 @@ public sealed class CaptureEngine(ISystemProbe probe, IMigrationLog log, IAppPla
         {
             manifest.LicenseKeys.AddRange(probe.LicenseKeys());
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Keys are a bonus: whatever goes wrong reading them, the backup itself must still finish.
             warn($"Couldn't read license keys: {ex.Message}");
             return;
         }
