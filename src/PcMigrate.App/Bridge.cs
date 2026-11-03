@@ -76,6 +76,9 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
         "deletedList" => DeletedList(Str(args, "query"), args.TryGetProperty("goodOnly", out var go) && go.ValueKind == JsonValueKind.True),
         "recoverDeleted" => await RecoverDeleted(args),
         "dupFolders" => DupFolders(),
+        "listPartitions" => await Task.Run(ListPartitions),
+        "resizeOptions" => await Task.Run(() => ResizeOptions(Int(args, "disk", -1), Int(args, "part", -1))),
+        "resizePartition" => await ResizePartition(args),
         "wipeCheck" => await Task.Run(() => WipeCheck(Int(args, "disk", -1))),
         "wipeDisk" => await WipeDisk(args),
         "wipeFiles" => await WipeFiles(args),
@@ -352,6 +355,57 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             foreach (var g in _dups) g.Copies.RemoveAll(c => paths.Contains(c.Path) && !File.Exists(c.Path));
             _dups.RemoveAll(g => g.Copies.Count < 2);
             return new { removed = result.Removed, freed = result.Freed, problems = result.Problems.Take(200) };
+        }
+        finally
+        {
+            EndWork();
+        }
+    }
+
+    // ----- partition resizing -----
+
+    private static List<object> ListPartitions() =>
+        Disks.List().Select(d => (object)new
+        {
+            number = d.Number, model = d.Model, size = d.Size, bus = d.Bus, isSystem = d.IsSystem,
+            partitions = d.Partitions.OrderBy(p => p.Offset).Select(p => new
+            {
+                number = p.Number, offset = p.Offset, length = p.Length, used = p.UsedBytes, letter = p.DriveLetter,
+                label = ResizePlanner.Label(p), resizable = ResizePlanner.Resizable(p),
+            }),
+        }).ToList();
+
+    private static object ResizeOptions(int diskNumber, int partNumber)
+    {
+        var disk = Disks.List().FirstOrDefault(d => d.Number == diskNumber) ?? throw new InvalidOperationException("That drive isn't there any more.");
+        var part = disk.Partitions.FirstOrDefault(p => p.Number == partNumber) ?? throw new InvalidOperationException("That partition isn't there any more.");
+        var o = PartitionResizer.Options(disk, part);
+        return new
+        {
+            size = part.Length, min = o.Min, max = o.Max, blocked = o.Blocked,
+            canMoveRecovery = o.CanMoveRecovery, maxAfterMove = o.MaxAfterMovingRecovery,
+            moveProblem = o.CanMoveRecovery ? PartitionResizer.CheckMoveRecovery(disk, part) : null,
+        };
+    }
+
+    private async Task<object> ResizePartition(JsonElement args)
+    {
+        var disk = Int(args, "disk", -1);
+        var part = Int(args, "part", -1);
+        var size = args.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetInt64() : 0;
+        var move = args.TryGetProperty("moveRecovery", out var m) && m.ValueKind == JsonValueKind.True;
+        var ct = BeginWork();
+        var logPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "pc-migrate", $"resize-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+        using var log = new GuiLog(Post, logPath);
+        try
+        {
+            var done = await new PartitionResizer(log).ResizeAsync(disk, part, size, move, ct);
+            return new { size = done, logPath };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _notify.Failed("Resize stopped", Friendly(ex), logPath);
+            throw;
         }
         finally
         {

@@ -114,6 +114,7 @@ async Task<int> Run(string[] argv)
             "undelete" => Undelete(),
             "duplicates" => Duplicates(),
             "wipe" => await WipeCommand(),
+            "resize" => await ResizeCommand(),
             "schedule" => await ScheduleBackup(),
             "update" => await SelfUpdate(),
             "scan" => Scan(),
@@ -547,6 +548,65 @@ async Task<int> Run(string[] argv)
         return Done($"Wiped {result.Files:N0} file(s) ({CaptureEngine.FormatBytes(result.Bytes)}).", result.Problems.Count);
     }
 
+    async Task<int> ResizeCommand()
+    {
+        var letterArg = cli.Get("letter");
+        var diskArg = cli.Get("disk");
+        var partArg = cli.Get("partition");
+        var sizeArg = cli.Get("size");
+        var moveRecovery = cli.Flag("move-recovery");
+        var yes = cli.Flag("yes");
+        cli.RejectUnknown();
+        var disks = Disks.List();
+        DiskInfo? disk = null; PartitionInfo? part = null;
+        if (letterArg is not null)
+        {
+            var l = letterArg.TrimEnd(':', '\\')[..1];
+            foreach (var d in disks)
+                if (d.Partitions.FirstOrDefault(p => string.Equals(p.DriveLetter, l, StringComparison.OrdinalIgnoreCase)) is { } hit) { disk = d; part = hit; }
+        }
+        else if (int.TryParse(diskArg, out var dn) && int.TryParse(partArg, out var pn))
+        {
+            disk = disks.FirstOrDefault(d => d.Number == dn);
+            part = disk?.Partitions.FirstOrDefault(p => p.Number == pn);
+        }
+        else return Fail("Say which partition: --letter C, or --disk <n> --partition <n> (see pcmigrate-cli disks).");
+        if (disk is null || part is null) return Fail("That partition isn't there. Run pcmigrate-cli disks.");
+        if (!ResizePlanner.Resizable(part)) return Fail($"{ResizePlanner.Label(part)} can't be resized (only NTFS and ReFS data partitions can).");
+
+        var option = PartitionResizer.Options(disk, part);
+        Console.WriteLine($"{ResizePlanner.Label(part)} on {disk.Describe()}");
+        Console.WriteLine($"  Now:      {CaptureEngine.FormatBytes(part.Length)}{(part.UsedBytes is { } u ? $" ({CaptureEngine.FormatBytes(u)} used)" : "")}");
+        Console.WriteLine($"  Smallest: {CaptureEngine.FormatBytes(option.Min)}");
+        Console.WriteLine($"  Biggest:  {CaptureEngine.FormatBytes(option.Max)}");
+        if (option.Blocked is not null) Console.WriteLine($"  {option.Blocked}");
+        if (option.CanMoveRecovery) Console.WriteLine($"  With --move-recovery (the recovery partition goes to the end of the drive): up to {CaptureEngine.FormatBytes(option.MaxAfterMovingRecovery)}.");
+        if (sizeArg is null) { Console.WriteLine("Add --size <e.g. 300GB, or max> to resize it."); return 0; }
+
+        long size;
+        if (sizeArg.Equals("max", StringComparison.OrdinalIgnoreCase)) size = moveRecovery && option.CanMoveRecovery ? option.MaxAfterMovingRecovery : option.Max;
+        else if (ParseSize(sizeArg) is { } parsed) size = parsed;
+        else return Fail("--size takes a size like 300GB, 1.5TB or 51200MB, or max.");
+        if (ResizePlanner.Check(option, size, moveRecovery) is { } problem) return Fail(problem);
+        if (moveRecovery && PartitionResizer.CheckMoveRecovery(disk, part) is { } why) return Fail(why);
+        if (!yes)
+        {
+            Console.Write($"Resize {ResizePlanner.Label(part)} to {CaptureEngine.FormatBytes(size)}{(moveRecovery ? ", moving the recovery partition to the end" : "")}? Back up first if the files matter. Type yes: ");
+            if (!string.Equals(Console.ReadLine()?.Trim(), "yes", StringComparison.OrdinalIgnoreCase)) return Fail("Nothing was changed.");
+        }
+        var done = await new PartitionResizer(log).ResizeAsync(disk.Number, part.Number, size, moveRecovery, cts.Token);
+        return Done($"{ResizePlanner.Label(part)} is now {CaptureEngine.FormatBytes(done)}.", 0);
+    }
+
+    static long? ParseSize(string text)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(text.Trim(), @"^(\d+(?:\.\d+)?)\s*(TB|GB|MB)?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        var n = double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var unit = m.Groups[2].Value.ToUpperInvariant() switch { "TB" => 1L << 40, "MB" => 1L << 20, _ => 1L << 30 };
+        return (long)(n * unit);
+    }
+
     int Technician()
     {
         var off = cli.Flag("off");
@@ -851,6 +911,10 @@ async Task<int> Run(string[] argv)
                                            Overwrite so nothing can be recovered: a whole drive (then left as
                                            one empty drive, or --leave-blank), files and folders, or a drive's
                                            free space (wipes what was deleted before).
+              pcmigrate-cli resize --letter C [--size 300GB|max] [--move-recovery] [--yes]
+                                           Grow or shrink a partition (files are kept). Without --size, shows
+                                           how small and big it can be. --move-recovery moves the recovery
+                                           partition to the end of the drive when it blocks growing C:.
               pcmigrate-cli update         Download and install the newest version.
 
             Password protection (capture to a folder, and apply):

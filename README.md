@@ -139,6 +139,14 @@ for modern drives; three is an option. SSDs keep spare space Windows can't reach
 that's leaving your hands also run its maker's Secure Erase. Command line:
 `pcmigrate-cli wipe --disk 2`, `wipe --file "C:\Users\Sam\Old taxes"`, `wipe --free-space E:`.
 
+**Resize partitions.** **Tools → Resize partitions** (or `pcmigrate-cli resize --letter C`) shows each
+drive's layout to scale and lets an NTFS partition grow or shrink, keeping its files, between the
+smallest and biggest sizes Windows reports. The commonest snag after cloning to a bigger drive is C:
+not growing because the recovery partition sits right after it; the app spots that and offers to move
+the recovery partition to the end of the drive first, using Microsoft's own steps (recovery tools
+switched off, partition moved, switched back on). On the command line: `--size 900GB` or `--size max`,
+plus `--move-recovery`.
+
 `pcmigrate-cli keys` shows the license keys on this PC (or `--from-drive E:` for a dead PC's drive);
 the app has the same under **Tools → License keys**. A key built into the PC's firmware by its maker
 is shown too, but it only activates Windows on that PC.
@@ -320,4 +328,5 @@ tests/PcMigrate.Tests   tests, including full capture, send, receive and apply r
 14. Deleted file recovery (NTFS) ← done
 15. Duplicate file finder ← done
 16. Secure wipe (drives, files, free space) ← done
-17. Licensing, installer and a place to sell it
+17. Partition resizing (and moving the recovery partition out of the way) ← done
+18. Licensing, installer and a place to sell it
