@@ -38,6 +38,9 @@ public static class DuplicateFinder
         foreach (var folder in folders.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!Directory.Exists(folder)) continue;
+            // Windows' and programs' folders are skipped when they turn up inside the search, but a
+            // folder someone picked on purpose (say, inside AppData) is searched.
+            var pickedInside = IsProtected(Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar);
             var enumeration = new EnumerationOptions
             {
                 RecurseSubdirectories = true,
@@ -47,7 +50,7 @@ public static class DuplicateFinder
             foreach (var path in Directory.EnumerateFiles(folder, "*", enumeration))
             {
                 ct.ThrowIfCancellationRequested();
-                if (!seen.Add(path) || IsProtected(path)) continue;
+                if (!seen.Add(path) || (!pickedInside && IsProtected(path))) continue;
                 FileInfo info;
                 try { info = new FileInfo(path); if (info.Length < Math.Max(1, options.MinSize)) continue; }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
