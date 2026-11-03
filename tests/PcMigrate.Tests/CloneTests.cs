@@ -37,6 +37,32 @@ public class ClonePlannerTests
     }
 
     [Fact]
+    public void ImageSize_IsTheUsedSpacePlusRoom()
+    {
+        var size = ImagePlanner.NeededBytes(Source());
+        Assert.Equal(260 * MB + 16 * MB + 100 * GB + 600 * MB + 2 * GB, size);
+    }
+
+    [Fact]
+    public void ImageRestore_GrowsOntoABiggerDrive()
+    {
+        var image = Source() with { Number = 5, IsSystem = false };
+        var plan = ImagePlanner.PlanRestore(image, Target(1024 * GB));
+        Assert.True(plan.CanRun, plan.Problem);
+        Assert.True(plan.Partitions[2].Grows);
+    }
+
+    [Fact]
+    public void ImageRestore_TooSmallDriveSaysSoInsteadOfOfferingAShrink()
+    {
+        var image = Source() with { Number = 5, IsSystem = false };
+        var plan = ImagePlanner.PlanRestore(image, Target(256 * GB));
+        Assert.False(plan.CanRun);
+        Assert.Equal(0, plan.ShrinkSourceBy);
+        Assert.Contains("too small for this image", plan.Problem);
+    }
+
+    [Fact]
     public void OnlyUsedSpaceIsCopiedForNtfs()
     {
         var plan = ClonePlanner.Plan(Source(), Target(1024 * GB));

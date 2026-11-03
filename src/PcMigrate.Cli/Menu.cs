@@ -18,12 +18,13 @@ internal static class Menu
         Console.WriteLine("  6. Rescue a drive pulled from a dead PC (plugged in by USB)");
         Console.WriteLine("  7. Clone a whole drive onto another (erases the target)");
         Console.WriteLine("  8. Show license keys (Windows, Office, programs)");
-        Console.WriteLine("  9. Show all commands");
+        Console.WriteLine("  9. Save a whole drive as an image file, or put one back");
+        Console.WriteLine("  0. Show all commands");
         Console.WriteLine();
 
         while (true)
         {
-            switch (Prompt("Choose 1-9 (or press Enter to quit)"))
+            switch (Prompt("Choose 0-9 (or press Enter to quit)"))
             {
                 case "":
                     return null;
@@ -81,11 +82,26 @@ internal static class Menu
                     return drive.Length == 0 ? ["keys"] : ["keys", "--from-drive", drive];
                 }
                 case "9":
+                {
+                    Console.WriteLine();
+                    foreach (var disk in Disks.List())
+                        Console.WriteLine($"  {disk.Describe()}{(disk.IsSystem ? "   <- this PC runs from it" : "")}");
+                    if (Prompt("Make an image (M) or restore one (R)?").StartsWith('r'))
+                    {
+                        var image = PromptRequired("Image file, for example E:\\images\\PC.vhdx");
+                        var disk = PromptRequired("Number of the disk to put it on (it will be erased)");
+                        return ["restore-image", "--from", image, "--to", disk];
+                    }
+                    var from = PromptRequired("Number of the disk to image");
+                    var to = PromptRequired("Folder to save the image in, for example E:\\images");
+                    return ["image", "--from", from, "--to", to];
+                }
+                case "0":
                     return ["help"];
                 case "u" or "U":
                     return ["update"];
                 default:
-                    Console.WriteLine("Please type a number from 1 to 9.");
+                    Console.WriteLine("Please type a number from 0 to 9.");
                     break;
             }
         }
