@@ -26,8 +26,10 @@ if (interactive)
     {
         if (await Updater.CheckAsync("pcmigrate-cli.exe", ToolInfo.FullVersion, quick.Token) is { } newer)
         {
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine($"pc-migrate {newer.Tag.TrimStart('v')} is out (you have {ToolInfo.Version}). Type U below to update.");
+            Console.ForegroundColor = newer.Required ? ConsoleColor.Red : ConsoleColor.Cyan;
+            Console.WriteLine(newer.Required
+                ? $"REQUIRED UPDATE: {newer.RequiredBecause} Type U below to update to {newer.Tag.TrimStart('v')} before doing anything else."
+                : $"pc-migrate {newer.Tag.TrimStart('v')} is out (you have {ToolInfo.Version}). Type U below to update.");
             Console.ResetColor();
             Console.WriteLine();
         }
@@ -97,6 +99,17 @@ async Task<int> Run(string[] argv)
             probe = new OfflineSystemProbe(pulled, log);
             appPlatform = new OfflineAppPlatform(pulled, log);
             log.Info($"Found {pulled.ComputerName} ({pulled.OsDescription}).");
+        }
+
+        // A required update (this version has a serious problem, such as backups that can't be
+        // restored) stops jobs before they start. Offline, jobs run as usual.
+        if (cli.Command is "capture" or "send" or "receive" or "apply" or "backup" or "clone" or "image"
+                or "restore-image" or "wipe" or "resize" or "undelete" or "rescue-usb"
+            && await RequiredUpdate() is { } required)
+        {
+            if (cli.Command == "backup" && cli.Flag("scheduled"))
+                return await UpdateAndRerun(required);
+            return Fail($"This version of pc-migrate has to be updated before it can do that: {required.RequiredBecause} Run 'pcmigrate-cli update', then try again.");
         }
 
         return cli.Command switch
@@ -270,6 +283,29 @@ async Task<int> Run(string[] argv)
         var result = await new RescueUsbMaker(log).MakeAsync(disk, tools, cts.Token);
         foreach (var note in result.Notes) log.Info(note);
         return Done($"Rescue USB ready ({result.BootDrive}{(result.DataDrive is null ? "" : ", backups go on " + result.DataDrive)}).", 0);
+    }
+
+    async Task<UpdateInfo?> RequiredUpdate()
+    {
+        using var quick = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+        quick.CancelAfter(TimeSpan.FromSeconds(8));
+        try { return await Updater.CheckAsync("pcmigrate-cli.exe", ToolInfo.FullVersion, quick.Token) is { Required: true } u ? u : null; }
+        catch (OperationCanceledException) when (!cts.IsCancellationRequested) { return null; }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or System.Text.Json.JsonException) { return null; }
+    }
+
+    // A scheduled backup has nobody watching, so it updates itself and runs the backup with the new version.
+    async Task<int> UpdateAndRerun(UpdateInfo update)
+    {
+        log.Warn($"This version needs updating before it can back up ({update.RequiredBecause}). Updating to {update.Tag}...");
+        var downloaded = await Updater.DownloadAsync(update, exePath, null, cts.Token);
+        Updater.Swap(exePath, downloaded);
+        log.Info($"Updated to {update.Tag.TrimStart('v')}. Running the backup with it...");
+        var start = new System.Diagnostics.ProcessStartInfo(exePath) { UseShellExecute = false };
+        foreach (var a in argv) start.ArgumentList.Add(a);
+        using var child = System.Diagnostics.Process.Start(start) ?? throw new IOException("Couldn't start the updated version.");
+        await child.WaitForExitAsync(cts.Token);
+        return child.ExitCode;
     }
 
     async Task<int> SelfUpdate()

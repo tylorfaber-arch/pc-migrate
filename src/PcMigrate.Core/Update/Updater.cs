@@ -5,7 +5,15 @@ using PcMigrate.Core.Models;
 
 namespace PcMigrate.Core.Update;
 
-public sealed record UpdateInfo(Version Version, string Tag, string DownloadUrl, long Size, string? Sha256, string Notes, string PageUrl);
+public sealed record UpdateInfo(Version Version, string Tag, string DownloadUrl, long Size, string? Sha256, string Notes, string PageUrl)
+{
+    /// <summary>
+    /// Set when the running version is older than the newest release says is safe to use (for
+    /// example, a version whose backups don't finish). The app then won't run jobs until it's updated.
+    /// </summary>
+    public string? RequiredBecause { get; init; }
+    public bool Required => RequiredBecause is not null;
+}
 
 /// <summary>
 /// Keeps the portable exes up to date from the project's GitHub releases. Every push to main
@@ -54,14 +62,30 @@ public static class Updater
             // GitHub lists each asset's checksum as "sha256:<hex>".
             var digest = asset.TryGetProperty("digest", out var d) && d.ValueKind == JsonValueKind.String ? d.GetString() : null;
             var sha = digest is not null && digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? digest[7..].ToLowerInvariant() : null;
+            var notes = root.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString()! : "";
             return new UpdateInfo(version, tag,
                 asset.GetProperty("browser_download_url").GetString()!,
                 asset.GetProperty("size").GetInt64(),
                 sha,
-                root.TryGetProperty("body", out var body) && body.ValueKind == JsonValueKind.String ? body.GetString()! : "",
-                root.TryGetProperty("html_url", out var page) ? page.GetString() ?? "" : "");
+                notes,
+                root.TryGetProperty("html_url", out var page) ? page.GetString() ?? "" : "")
+            {
+                RequiredBecause = RequiredBy(notes) is { } req && Normalize(current) < Normalize(req.Minimum) ? req.Reason : null,
+            };
         }
         return null;
+    }
+
+    /// <summary>
+    /// The release notes carry the oldest version that's still safe to use, from the repository's
+    /// REQUIRED_VERSION file, as a hidden line: &lt;!-- required-version: 0.1.0.49 | reason --&gt;
+    /// </summary>
+    public static (Version Minimum, string Reason)? RequiredBy(string notes)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(notes, @"<!--\s*required-version:\s*([0-9.]+)\s*\|\s*(.*?)\s*-->");
+        if (!m.Success || !System.Version.TryParse(m.Groups[1].Value, out var v)) return null;
+        var reason = m.Groups[2].Value.Trim();
+        return (v, reason.Length > 0 ? reason : "This version has a serious problem that's fixed in the new one.");
     }
 
     // 0.1.0 and 0.1.0.0 should compare equal.

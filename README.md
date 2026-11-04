@@ -59,6 +59,13 @@ type ERASE to start. The drive Windows is running from can be copied but never w
 top: **Update now** downloads it, checks it against GitHub's checksum, swaps it in and restarts.
 The command-line tool does the same with `pcmigrate-cli update`. Nothing is checked without internet.
 
+**Required updates.** When a version has a serious problem (such as backups that can't be restored),
+the `REQUIRED_VERSION` file in this repository names the oldest safe version and why. Every release
+carries it, and older copies then won't start a job until they're updated: the app covers its
+window with an **Update now** screen, the command-line tool refuses with the reason, and a scheduled
+backup updates itself and carries on. Without internet, nothing is blocked. Versions before 0.2.0
+don't know about this, so anyone on those has to download the new version once by hand.
+
 When a job finishes or stops, Windows shows a notification and the taskbar button flashes, so you
 can walk away from a long copy. Clicking the notification opens the log or report.
 

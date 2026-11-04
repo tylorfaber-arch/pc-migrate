@@ -75,6 +75,24 @@ public class IncrementalBackupTests
     }
 
     [Fact]
+    public async Task APlainBackupOverAnUnfinishedPasswordRunStillRestores()
+    {
+        using var pc = new FakePc("pc", "tylor");
+        using var store = new TempDir();
+        pc.WriteFile("tylor", "Documents/a.txt", "a");
+        // An unfinished password-protected run: its password file is there, its list of files isn't.
+        await using (new FolderSink(store.Path, "forgotten password")) { }
+        Assert.True(FolderSink.IsProtected(store.Path));
+
+        await RunAsync(pc, store.Path);
+
+        Assert.False(FolderSink.IsProtected(store.Path));
+        using var newPc = new FakePc("new", "tylor");
+        await new ApplyEngine(newPc, new ListLog()).RunAsync(store.Path, new ApplyOptions());
+        Assert.Equal("a", File.ReadAllText(Path.Combine(newPc.Profile("tylor"), "Documents", "a.txt")));
+    }
+
+    [Fact]
     public async Task WrongPasswordIsRefused()
     {
         using var pc = new FakePc("pc", "tylor");

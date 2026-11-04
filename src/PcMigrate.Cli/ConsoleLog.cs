@@ -57,7 +57,8 @@ internal sealed class ConsoleLog(string? logFile) : IMigrationLog, IDisposable
     {
         if (path is null) return null;
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        return new StreamWriter(path, append: true) { AutoFlush = true };
+        // Shared, so a scheduled backup that updated itself can hand the same log to the new version.
+        return new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
     }
 
     private static int SafeWidth()

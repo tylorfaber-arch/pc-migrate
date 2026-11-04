@@ -129,6 +129,17 @@ main { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
 .update-bar a { color: var(--accent); cursor: pointer; text-decoration: underline; }
 .update-bar .btn { padding: 6px 14px; font-size: 13px; }
 
+/* ---------- required update: covers everything until updated ---------- */
+.must-update { display: none; position: fixed; inset: 0; z-index: 50; background: var(--bg); align-items: center; justify-content: center; padding: 24px 16px; }
+.must-update.show { display: flex; }
+.must-update .box { background: var(--surface); border: 1px solid var(--bad); border-radius: var(--radius); box-shadow: var(--shadow); max-width: 520px; width: 100%; padding: 28px; }
+.must-update h2 { margin: 0 0 6px; font-size: 22px; }
+.must-update .tag { display: inline-block; color: var(--bad); font-weight: 600; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 10px; }
+.must-update p { color: var(--muted); margin: 8px 0; line-height: 1.5; }
+.must-update .why { color: var(--text); background: var(--surface-2); border-radius: 10px; padding: 12px 14px; }
+.must-update .row { display: flex; gap: 12px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+.must-update a { color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 14px; }
+
 /* ---------- cards ---------- */
 .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .choice {
@@ -411,6 +422,19 @@ footer .grow { flex: 1; }
   <span class="spacer"></span>
   <button class="btn ghost" id="updateLater">Later</button>
   <button class="btn" id="updateNow">Update now</button>
+</div>
+
+<div class="must-update" id="mustUpdate" role="alertdialog" aria-labelledby="mustTitle">
+  <div class="box">
+    <span class="tag">Required update</span>
+    <h2 id="mustTitle">Update pc-migrate before using it</h2>
+    <p class="why" id="mustWhy"></p>
+    <p id="mustText"></p>
+    <div class="row">
+      <button class="btn" id="mustNow">Update now</button>
+      <a id="mustPage">Download it from the website instead</a>
+    </div>
+  </div>
 </div>
 
 <div class="shell">
@@ -1048,6 +1072,7 @@ async function checkUpdate() {
   let u;
   try { u = await call("checkUpdate"); } catch { return; }
   if (!u) return;
+  if (u.required) return requireUpdate(u);
   $("updateText").innerHTML = `<b>pc-migrate ${esc(u.version)}</b> is out (you have ${esc(state.here.version)}).`;
   $("updateNotes").onclick = () => call("openPath", { path: u.page });
   $("updateBar").classList.add("show");
@@ -1059,7 +1084,29 @@ $("updateNow").addEventListener("click", async () => {
   try { await call("installUpdate"); $("updateText").textContent = "Restarting into the new version…"; }
   catch (e) { toast(e.message); $("updateText").textContent = "The update didn't install."; b.disabled = false; $("updateLater").disabled = false; }
 });
-on("updateProgress", m => { $("updateText").textContent = `Downloading the update… ${Math.floor(m.fraction * 100)}%`; });
+on("updateProgress", m => {
+  const text = `Downloading the update… ${Math.floor(m.fraction * 100)}%`;
+  $("updateText").textContent = text;
+  if ($("mustUpdate").classList.contains("show")) $("mustText").textContent = text;
+});
+
+// A required update (this version has a serious problem) covers the whole window, with no "Later".
+// It only appears between jobs: at start, or when a job is about to begin.
+function requireUpdate(u) {
+  $("updateBar").classList.remove("show");
+  $("mustWhy").textContent = u.required;
+  $("mustText").textContent = `Version ${u.version} fixes this (you have ${state.here.version}). It's a ${Math.round(u.sizeBytes / 1e6)} MB download and pc-migrate restarts by itself.`;
+  $("mustPage").onclick = () => call("openPath", { path: u.page });
+  $("mustUpdate").classList.add("show");
+  $("mustNow").focus();
+}
+on("updateRequired", requireUpdate);
+$("mustNow").addEventListener("click", async () => {
+  const b = $("mustNow"); b.disabled = true;
+  $("mustText").textContent = "Downloading the update…";
+  try { await call("installUpdate"); $("mustText").textContent = "Restarting into the new version…"; }
+  catch (e) { $("mustText").textContent = e.message + " Use the download link instead."; b.disabled = false; }
+});
 
 // ----- dead PC: its drive, plugged in here -----
 let drives = [], pickedDrive = null;
@@ -2141,7 +2188,7 @@ const Mock = {
       case "pickFolder": return reply(args.purpose === "save" ? { path: "E:\\Migration", freeBytes: 412e9, hasStore: false } : { path: "E:\\Migration", hasStore: true, locked: true });
       case "startReceive": return reply({ code: "482913", addresses: ["192.168.1.42"] });
       case "planApps": return reply(MOCK_APPS, 1600);
-      case "checkUpdate": return reply({ version: "0.1.0.61", notes: "", page: "https://github.com/tylorfaber-arch/pc-migrate/releases/latest", sizeBytes: 70e6 }, 800);
+      case "checkUpdate": return reply({ version: "0.1.0.61", notes: "", page: "https://github.com/tylorfaber-arch/pc-migrate/releases/latest", sizeBytes: 70e6, required: location.hash === "#required" ? "Backups made with older versions may not finish or restore. This version fixes that." : null }, 800);
       case "listDrives": return reply([
         { root: "E:\\", label: "Windows", locked: false, computerName: "SAM-OLD-LAPTOP", usedBytes: 212e9, totalBytes: 476e9, users: ["Sam", "Admin"] },
         { root: "F:\\", locked: true, users: [] }], 900);
