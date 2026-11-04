@@ -50,10 +50,25 @@ jobs:
 
       # Every push to main becomes a release, so the README's
       # releases/latest/download/pc-migrate.exe link always serves the newest build.
+      # REQUIRED_VERSION (line 1: the oldest safe version, line 2: why) goes into every release's
+      # notes, so copies older than that block jobs until they update.
+      - name: Write release notes
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $lines = @(Get-Content REQUIRED_VERSION -ErrorAction SilentlyContinue)
+          $body = ""
+          if ($lines.Count -ge 1 -and $lines[0].Trim()) {
+            $min = $lines[0].Trim(); $why = if ($lines.Count -ge 2) { $lines[1].Trim() } else { "" }
+            $body = "<!-- required-version: $min | $why -->`n**Required update for versions older than $min.** $why`n`n"
+          }
+          Set-Content -Path release-notes.md -Value $body -Encoding utf8NoBOM
+
       - name: Publish release
         if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
+          body_path: release-notes.md
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: pc-migrate ${{ steps.version.outputs.tag }}

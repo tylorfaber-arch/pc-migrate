@@ -48,6 +48,7 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
             id = root.GetProperty("id").GetInt32();
             var cmd = root.GetProperty("cmd").GetString();
             var args = root.TryGetProperty("args", out var a) ? a.Clone() : default;
+            if (JobCommands.Contains(cmd!)) await RefuseIfUpdateRequired();
             var result = await RunAsync(cmd!, args);
             Reply(new { id, result });
         }
@@ -694,13 +695,45 @@ internal sealed class Bridge(Form form, CoreWebView2 web) : IDisposable
     private UpdateInfo? _update;
     private static string ExePath => Environment.ProcessPath ?? Application.ExecutablePath;
 
+    private DateTime _updateCheckedAt;
+
+    // Commands that start a job; a required update stops them before they begin.
+    private static readonly HashSet<string> JobCommands =
+    [
+        "makeRescueUsb", "makeImage", "restoreImage", "captureHere", "capture", "send", "startReceive", "apply",
+        "clone", "shrinkSource", "recoverDeleted", "resizePartition", "wipeDisk", "wipeFiles", "wipeFree",
+        "removeDuplicates", "scheduleSave", "scheduleRunNow",
+    ];
+
     private async Task<object?> CheckUpdate()
     {
         // Now that the app has started properly, the version an update replaced can go.
         Updater.CleanUp(ExePath);
         _update = await Updater.CheckAsync("pc-migrate.exe", ToolInfo.FullVersion);
+        _updateCheckedAt = DateTime.UtcNow;
         if (_update is null) return null;
-        return new { version = _update.Tag.TrimStart('v'), notes = _update.Notes, page = _update.PageUrl, sizeBytes = _update.Size };
+        return new { version = _update.Tag.TrimStart('v'), notes = _update.Notes, page = _update.PageUrl, sizeBytes = _update.Size, required = _update.RequiredBecause };
+    }
+
+    /// <summary>
+    /// Looks again (at most every half hour, briefly, and never blocking when offline) in case a
+    /// required update came out while the app was open, then refuses if one is waiting.
+    /// </summary>
+    private async Task RefuseIfUpdateRequired()
+    {
+        if (DateTime.UtcNow - _updateCheckedAt > TimeSpan.FromMinutes(30))
+        {
+            using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                _update = await Updater.CheckAsync("pc-migrate.exe", ToolInfo.FullVersion, quick.Token);
+                _updateCheckedAt = DateTime.UtcNow;
+                if (_update is { Required: true }) Post("updateRequired", new { version = _update.Tag.TrimStart('v'), page = _update.PageUrl, sizeBytes = _update.Size, required = _update.RequiredBecause });
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or HttpRequestException or IOException or JsonException) { }
+        }
+        if (_update is { Required: true })
+            throw new InvalidOperationException($"This version of pc-migrate has to be updated first: {_update.RequiredBecause}");
     }
 
     /// <summary>Downloads the new version, swaps it in, and restarts into it.</summary>

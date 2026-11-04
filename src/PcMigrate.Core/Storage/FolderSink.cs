@@ -21,6 +21,12 @@ public sealed class FolderSink : IMigrationSink
             _key = key;
             File.WriteAllText(Path.Combine(_root, EncryptionInfo.FileName), Json.Serialize(info));
         }
+        else
+        {
+            // A plain backup into a folder an unfinished password-protected run left behind: its
+            // password file would make this backup ask for a password it doesn't have.
+            File.Delete(Path.Combine(_root, EncryptionInfo.FileName));
+        }
     }
 
     private FolderSink(string root, StoreKey? key, Dictionary<string, ManifestFile>? previous)
