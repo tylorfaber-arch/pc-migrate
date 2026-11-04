@@ -84,8 +84,14 @@ public static partial class InstallerFinder
         var words = Words(programName).Take(3).ToList();
         if (words.Count == 0 || (words.Count == 1 && words[0].Length < 5)) return false;
         var file = Squash(fileName);
-        return words.All(w => file.Contains(w, StringComparison.Ordinal));
+        if (!words.All(w => file.Contains(w, StringComparison.Ordinal))) return false;
+        // "TurboTax 2019" and "TurboTax 2023" are different programs: a year in the name has to be in
+        // the file name too, or one generic download would pass for every year's installer.
+        return Year().Matches(programName).All(y => file.Contains(y.Value, StringComparison.Ordinal));
     }
+
+    [GeneratedRegex(@"(?<!\d)(?:19|20)\d\d(?!\d)")]
+    private static partial Regex Year();
 
     private static IEnumerable<string> Words(string name) =>
         Word().Matches(name.ToLowerInvariant())

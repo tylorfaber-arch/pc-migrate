@@ -16,6 +16,9 @@ public class InstallerFinderTests
     [InlineData("Notepad++ (64-bit x64)", "notepad++ setup", true)]
     [InlineData("Zoom", "ZoomInstaller", false)] // one short word could be anything
     [InlineData("Audacity 3.4.2", "audacity-win-3.4.2-64bit", true)]
+    [InlineData("TurboTax 2019", "Windows_PC_TurboTax_Download (1)", false)] // one downloader isn't every year's installer
+    [InlineData("TurboTax 2024", "TurboTax 2024", true)]
+    [InlineData("TurboTax 2023", "TurboTax 2024", false)]
     public void NameMatching(string program, string file, bool expected) =>
         Assert.Equal(expected, InstallerFinder.NameMatches(program, file));
 

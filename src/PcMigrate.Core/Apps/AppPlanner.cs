@@ -69,7 +69,7 @@ public static partial class AppPlanner
 
         // One row per program even if Windows lists it twice (e.g. 32- and 64-bit entries).
         return plans
-            .GroupBy(p => AppNames.Normalize(p.Name))
+            .GroupBy(p => AppNames.Normalize(Language().Replace(p.Name, "")))
             .Select(g => g.OrderBy(p => Rank(p.Method)).First())
             .OrderBy(p => Rank(p.Method)).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -106,6 +106,14 @@ public static partial class AppPlanner
         if (SqlServer().IsMatch(name))
             return (AppMethod.Manual, "A database server. Install SQL Server fresh, then move each database with a backup and restore; copying its files won't work.", false);
 
+        if (RemoteAccess().IsMatch(name) || RemoteAccess().IsMatch(app.Publisher ?? ""))
+            return (AppMethod.Manual, "Remote-access software someone set up to reach this PC (usually an IT company). Don't reinstall it blindly: check who it belongs to, and have them set up the new PC if they still look after it.", false);
+        if (Printer().IsMatch(name))
+            return (AppMethod.Manual, "Printer software. Connect the printer to the new PC; Windows usually finds its driver. For the full software, get the one for that printer model from the printer maker's website.", false);
+        // Before winget: reinstalling the old PC maker's tools makes no sense on a different PC.
+        if (Oem().IsMatch(name) || Oem().IsMatch(app.Publisher ?? ""))
+            return (AppMethod.Manual, "A tool from the old PC's maker, made for that PC's hardware. The new PC comes with its own maker's tools.", false);
+
         if (winget is not null)
             return (AppMethod.Reinstall, "Installed fresh on the new PC, then your settings are copied over.", false);
 
@@ -115,8 +123,6 @@ public static partial class AppPlanner
             return (AppMethod.Manual, "Installed through the Visual Studio Installer, which has to install it again. Get it from Microsoft's website.", false);
         if (Driver().IsMatch(name) || Driver().IsMatch(app.Publisher ?? ""))
             return (AppMethod.Manual, "Hardware software. The new PC needs the version made for its own hardware.", false);
-        if (Oem().IsMatch(name) || Oem().IsMatch(app.Publisher ?? ""))
-            return (AppMethod.Manual, "A tool from the old PC's maker, made for that PC's hardware. The new PC comes with its own maker's tools.", false);
         if (Security().IsMatch(name))
             return (AppMethod.Manual, "Security software has to be installed fresh.", false);
         if (app.IsMsi)
@@ -155,7 +161,7 @@ public static partial class AppPlanner
     /// <summary>Things that come with Windows or get installed by other programs; listing them would only confuse.</summary>
     internal static bool IsHidden(InstalledApp app) => Hidden().IsMatch(app.Name);
 
-    [GeneratedRegex(@"^(microsoft visual c\+\+|microsoft \.net|microsoft asp\.net|microsoft windows desktop runtime|windows software development kit|windows sdk|microsoft update health|microsoft edge|microsoft onedrive|windows pc health check|microsoft gameinput|vs_|microsoft visual studio installer|update for |security update|hotfix)|webview2|\bredistributable\b", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(microsoft visual c\+\+|microsoft \.net|microsoft asp\.net|microsoft windows desktop runtime|windows software development kit|windows sdk|microsoft update health|microsoft edge|microsoft onedrive|windows pc health check|microsoft gameinput|microsoft windows application compatibility|adobe genuine service|vs_|microsoft visual studio installer|update for |security update|hotfix)|webview2|\bredistributable\b", RegexOptions.IgnoreCase)]
     private static partial Regex Hidden();
 
     [GeneratedRegex(@"^(microsoft (office|365|project|visio|onenote|outlook|word|excel|powerpoint|access|publisher)|office 16 click-to-run)", RegexOptions.IgnoreCase)]
@@ -170,6 +176,16 @@ public static partial class AppPlanner
 
     [GeneratedRegex(@"^(dell|hp|hewlett[- ]packard|lenovo|asus|asustek|acer|msi|micro-star|microsoft surface|samsung electronics|toshiba|dynabook|fujitsu|panasonic|getac)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Oem();
+
+    [GeneratedRegex(@"\b(screenconnect|connectwise control|kaseya|ninjarmm|ninjaone|datto rmm|n-able|n-central|atera|splashtop streamer|bomgar|beyondtrust|logmein)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex RemoteAccess();
+
+    [GeneratedRegex(@"^(?!.*\bpdf\b).*\b(printer|laserjet|officejet|deskjet|pagewide|pixma|imageclass|maxify|ecotank|mfp|hpssupply|hp smart)\b", RegexOptions.IgnoreCase)]
+    private static partial Regex Printer();
+
+    // " - en-us" on Office and others: one row per program, not one per language.
+    [GeneratedRegex(@"\s+-\s+[a-z]{2}-[a-z]{2}$", RegexOptions.IgnoreCase)]
+    private static partial Regex Language();
 
     [GeneratedRegex(@"\b(norton|mcafee|bitdefender|kaspersky|avast|avg|eset|sophos|crowdstrike|sentinelone|webroot|trend micro|antivirus|anti-virus)\b", RegexOptions.IgnoreCase)]
     private static partial Regex Security();
