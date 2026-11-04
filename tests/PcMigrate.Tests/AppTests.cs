@@ -210,6 +210,34 @@ public class AppPlannerAndMoveTests
     }
 
     [Fact]
+    public void Plan_PrintersRemoteAccessMakerToolsAndNoise()
+    {
+        using var pc = new FakePc("old", "tylor");
+        pc.Inventory.Apps.AddRange(
+        [
+            App("HP LaserJet Professional P1100-P1560-P1600 Series", publisher: "HP"),
+            App("HPSSupply", publisher: "HP Inc."),
+            App("ScreenConnect Client (cf08aa98ac8cdc00)", msi: true, publisher: "ScreenConnect Software"),
+            App("Dell Command | Update for Windows Universal", publisher: "Dell Inc."),
+            App("Microsoft Windows Application Compatibility Fix Database"),
+            App("Adobe Genuine Service", publisher: "Adobe Inc."),
+            App("Microsoft Office Professional 2019 - en-us"),
+            App("Microsoft Office Professional 2019 - es-es"),
+        ]);
+        var platform = new FakeApps { Winget = [new WingetRow("Dell Command | Update for Windows Universal", "Dell.CommandUpdate.Universal", "5.4", "winget")] };
+
+        var plans = AppPlanner.Plan(pc.Inventory, platform, pc.Inventory.Users, new CaptureRules()).ToDictionary(p => p.Name);
+
+        Assert.Contains("Printer software", plans["HP LaserJet Professional P1100-P1560-P1600 Series"].Reason);
+        Assert.Contains("Printer software", plans["HPSSupply"].Reason);
+        Assert.Contains("Remote-access", plans["ScreenConnect Client (cf08aa98ac8cdc00)"].Reason);
+        Assert.Null(plans["ScreenConnect Client (cf08aa98ac8cdc00)"].InstallerSource);
+        Assert.Equal(AppMethod.Manual, plans["Dell Command | Update for Windows Universal"].Method);
+        Assert.DoesNotContain(plans.Keys, k => k.Contains("Compatibility Fix") || k.Contains("Genuine"));
+        Assert.Single(plans.Keys, k => k.StartsWith("Microsoft Office"));
+    }
+
+    [Fact]
     public void Plan_FindsSettingsFolders()
     {
         using var pc = new FakePc("old", "tylor");
