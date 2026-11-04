@@ -23,6 +23,13 @@ public class InstallerFinderTests
         Assert.Equal(expected, InstallerFinder.NameMatches(program, file));
 
     [Theory]
+    [InlineData("ScreenConnect.ClientSetup (1)&e=Access&y=Guest&c=Acme.msi", "ScreenConnect.ClientSetup (1)&e=Access&y=Guest&c=Acme.msi")]
+    [InlineData("TurboTax 2024.msi", "TurboTax 2024.msi")]
+    [InlineData("bad|name?.exe", "bad_name_.exe")]
+    public void SavedInstallersKeepTheirExactName(string name, string expected) =>
+        Assert.Equal(expected, PcMigrate.Core.Capture.AppCapture.KeepName(name));
+
+    [Theory]
     [InlineData("\"C:\\ProgramData\\Package Cache\\{abc}\\VC_redist.x64.exe\"  /uninstall", "C:\\ProgramData\\Package Cache\\{abc}\\VC_redist.x64.exe")]
     [InlineData("C:\\ProgramData\\Package Cache\\{abc}\\setup.exe /uninstall", "C:\\ProgramData\\Package Cache\\{abc}\\setup.exe")]
     [InlineData("\"C:\\Program Files\\Foo\\uninst.exe\"", null)]

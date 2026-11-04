@@ -85,7 +85,7 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
     private async Task CaptureInstallerAsync(AppEntry app, AddFileFn addFile)
     {
         var source = app.InstallerSource;
-        var storePath = source is null ? null : StorePath.Combine("files", "apps", app.Key, "installer", SafeName(Path.GetFileName(source)));
+        var storePath = source is null ? null : StorePath.Combine("files", "apps", app.Key, "installer", KeepName(Path.GetFileName(source)));
         if (source is not null && storePath is not null && await addFile(source, storePath, File.GetLastWriteTimeUtc(source)))
         {
             app.InstallerStorePath = storePath;
@@ -117,6 +117,15 @@ internal sealed class AppCapture(IAppPlatform? platform, IMigrationLog log, Acti
             var storePath = StorePath.Combine("files", "runtimes", SafeName(runtime.WingetId), SafeName(Path.GetFileName(file)));
             if (await addFile(file, storePath, DateTime.UtcNow)) runtime.InstallerStorePath = storePath;
         }
+    }
+
+    // Some installers read settings from their own file name (ScreenConnect clients, for one), so it's
+    // kept exactly as it was; only characters Windows can't have in a name are replaced.
+    internal static string KeepName(string name)
+    {
+        var bad = Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '|', '?', '*', '\\', '/']).ToHashSet();
+        var clean = new string(name.Select(c => bad.Contains(c) || c < 32 ? '_' : c).ToArray()).Trim(' ', '.');
+        return clean.Length == 0 ? "installer" : clean;
     }
 
     private static string SafeName(string name)
